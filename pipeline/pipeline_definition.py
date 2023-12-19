@@ -6,12 +6,14 @@ from pipeline.components import (
     split_parquet_file,
     run_dask_preprocessing,
     get_label_series,
+    create_train_dev_test_split,
 )
 from container_component_src.utils import create_s3_client
 
 # load config
 with open("config.toml", "r") as f:
     config = toml.load(f)
+
 
 def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
     """Adds environment variables for minio to the tasks"""
@@ -68,4 +70,9 @@ def columbus_eclss_ad_pipeline():
         anomaly_end_col=config["col-names"]["ar_end_ts_col"],
     )
 
-
+    split_data_task = create_train_dev_test_split(
+        preproc_df_in=dask_preprocessing_task.outputs["preprocessed_df"],
+        anomaly_df_in=get_label_series_task.outputs["labels_series"],
+        window_hours=250,
+        train_split=0.8,
+    )

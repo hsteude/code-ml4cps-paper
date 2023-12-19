@@ -147,3 +147,65 @@ def get_label_series(
 
     # Save labels series as df
     df_telemetry[[ar_col]].to_parquet(labels_series.path)
+
+
+@dsl.component(packages_to_install=["pyarrow", "pandas"], base_image="python:3.9")
+def create_train_dev_test_split(
+    preproc_df_in: Input[Dataset], 
+    anomaly_df_in: Input[Dataset], 
+    window_hours: float, 
+    df_train: Output[Dataset],
+    df_val: Output[Dataset],
+    df_test: Output[Dataset],
+    train_split: float = 0.8,
+) -> None:
+    """
+    Splits the data into train, dev, and test sets. Test set will contain only the data points within the specified
+    time window around each anomaly and a column indicating actual anomalies.
+
+    Args:
+        preproc_df (pd.DataFrame): Preprocessed multivariate time series data.
+        anomaly_df (pd.DataFrame): DataFrame with anomaly labels.
+        window_hours (float): Size of the time window around each anomaly in hours.
+        train_split (float): Proportion of non-test data to use for training.
+
+    Returns:
+        tuple: Three DataFrames corresponding to the train, dev, and test sets.
+    """
+    import pandas as pd
+    from datetime import timedelta
+
+    # read in data
+    anomaly_df = pd.read_parquet(anomaly_df_in.path)
+    preproc_df = pd.read_parquet(preproc_df_in.path)
+
+
+    window_size = timedelta(hours=window_hours)
+
+    # Identifying the timestamps of anomalies
+    anomaly_timestamps = anomaly_df.index[anomaly_df['Anomaly'] == 1]
+
+    # Creating a mask for the test set
+    test_mask = pd.Series(False, index=preproc_df.index)
+    for timestamp in anomaly_timestamps:
+        start_window = timestamp - window_size
+        end_window = timestamp + window_size
+        test_mask.loc[start_window:end_window] = True
+
+    # Splitting the dataframes and adding anomaly column to test set
+    test_df = preproc_df[test_mask].copy()
+    test_df['Actual_Anomaly'] = anomaly_df['Anomaly'][test_mask]
+
+    non_test_df = preproc_df[~test_mask]
+
+    # Randomly splitting the non-test data into train and dev sets
+    train_df = non_test_df.sample(frac=train_split, random_state=42)  # e.g., 80% to train
+    val_df = non_test_df.drop(train_df.index)  # Remaining to dev
+
+    # write out
+    train_df.to_parquet(df_train.path)
+    val_df.to_parquet(df_val.path)
+    test_df.to_parquet(df_test.path)
+
+
+
