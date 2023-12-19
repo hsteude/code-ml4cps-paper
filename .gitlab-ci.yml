@@ -1,0 +1,44 @@
+default:
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+
+variables:
+  REGISTRY_HOME: "${CI_REGISTRY}/${CI_PROJECT_PATH}/"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  CI_DEBUG_TRACE: "true"
+  KANIKO_CACHE: "$CI_PROJECT_DIR/.cache/kaniko"
+  IMAGE_NAME: "columbus-ad"
+
+cache:
+  paths:
+    - .cache/pip
+    - .cache/kaniko
+    - /kaniko
+
+before_script:
+  - mkdir -p /kaniko/.docker
+  # adding our cert to kaniko's additional certs
+  - cat ${CI_SERVER_TLS_CA_FILE} >> /kaniko/ssl/certs/additional-ca-cert-bundle.crt
+  # Creating kaniko config
+  - >
+    echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" 
+    | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+
+
+stages:
+  - build-image 
+
+
+base-image-build:
+  stage: build-image
+  script:
+    - >
+      /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --destination "${CI_REGISTRY}/${CI_PROJECT_PATH}/${IMAGE_NAME}:latest"
+      --destination "${CI_REGISTRY}/${CI_PROJECT_PATH}/${IMAGE_NAME}:commit-${CI_COMMIT_SHORT_SHA}"
+      --cache=true
+      --cache-run-layers=true
+      --cache-dir=${KANIKO_CACHE}
