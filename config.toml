@@ -1,15 +1,16 @@
 [paths]
-telemetry_data_directory = "eclss-data/telemetry/yearly-archives"
+telemetry_data_directory="eclss-data/telemetry/yearly-archives"
+labels_xls_artifact_uri="minio://eclss-data/ARs - ECLSS - 2022.02.07 - reduced to 2020-2021 v4.xls"
+partitioned_telemetry_path="s3://eclss-data/telemetry/partitioned-telemetry/*/*"
 
 [col-names]
-timestamp_col = 'normalizedTime'
-ar_start_ts_col = 'EVENT GMT (DOY/HH:MM:SS)'
-ar_end_ts_col = 'Duration/End GMT'
-ar_col = 'Anomaly'
-ar_symbol_col = 'SYMBOL'
-ar_title_col = 'TITLE'
-ar_id_col = 'ID'
+timestamp_col="normalizedTime"
+ar_start_ts_col="EVENT GMT (DOY/HH:MM:SS)"
+ar_end_ts_col="Duration/End GMT"
+ar_col="Anomaly"
+ar_symbol_col="SYMBOL"
+ar_title_col="TITLE"
+ar_id_col="ID"
 
 [images]
-eclss-ad-image = "gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad"
-
+eclss-ad-image="gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad"

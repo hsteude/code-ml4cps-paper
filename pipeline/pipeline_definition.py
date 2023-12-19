@@ -13,6 +13,17 @@ from container_component_src.utils import create_s3_client
 with open("config.toml", "r") as f:
     config = toml.load(f)
 
+def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
+    """Adds environment variables for minio to the tasks"""
+    for task in task_list:
+        task.set_env_variable(
+            "AWS_SECRET_ACCESS_KEY", os.environ["AWS_SECRET_ACCESS_KEY"]
+        ).set_env_variable(
+            "AWS_ACCESS_KEY_ID", os.environ["AWS_ACCESS_KEY_ID"]
+        ).set_env_variable(
+            "S3_ENDPOINT", "minio.minio"
+        )
+
 
 # define pipeline
 @dsl.pipeline
@@ -34,7 +45,7 @@ def split_parquet_files_sub_pipeline():
 def columbus_eclss_ad_pipeline():
     split_parquet_files_task = split_parquet_files_sub_pipeline()
     dask_preprocessing_task = run_dask_preprocessing(
-        partitioned_telemetry_paths="s3://eclss-data/telemetry/partitioned-telemetry/*/*",
+        partitioned_telemetry_paths=config["paths"]["partitioned_telemetry_path"],
         sample_frac=0.001,
         timestamp_col="normalizedTime",
         minio_endpoint="http://minio.minio",
@@ -45,7 +56,7 @@ def columbus_eclss_ad_pipeline():
     add_minio_env_vars_to_tasks([dask_preprocessing_task])
 
     import_label_xls_task = dsl.importer(
-        artifact_uri="minio://eclss-data/ARs - ECLSS - 2022.02.07 - reduced to 2020-2021 v3.xls",
+        artifact_uri=config["paths"]["labels_xls_artifact_uri"],
         artifact_class=dsl.Dataset,
     )
 
@@ -58,13 +69,3 @@ def columbus_eclss_ad_pipeline():
     )
 
 
-def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
-    """Adds environment variables for minio to the tasks"""
-    for task in task_list:
-        task.set_env_variable(
-            "AWS_SECRET_ACCESS_KEY", os.environ["AWS_SECRET_ACCESS_KEY"]
-        ).set_env_variable(
-            "AWS_ACCESS_KEY_ID", os.environ["AWS_ACCESS_KEY_ID"]
-        ).set_env_variable(
-            "S3_ENDPOINT", "minio.minio"
-        )
