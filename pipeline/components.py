@@ -242,16 +242,6 @@ def scale_dataframes(
     """
     Scales the given train, validation, and test dataframes using the provided scaler.
     Assumes that the test dataframe contains an additional column for labels.
-
-    Args:
-    train_df: KFP Dataset for DataFrame containing training data.
-    val_df: KFP Dataset for DataFrame containing validation data.
-    test_df: KFP Dataset for DataFrame containing test data, with an additional column for labels.
-    scaler: KFP Artifact for Scikit-Learn Scaler.
-    label_column: The name of the label column in the test dataframe.
-
-    Returns:
-    None: Scaled dataframes are written out as parquet files.
     """
     import pandas as pd
     import joblib
@@ -262,16 +252,22 @@ def scale_dataframes(
     ]
     scaler = joblib.load(scaler_in.path)
 
-    # Scale the training data
-    train_df_sc = pd.DataFrame(scaler.fit_transform(train_df), columns=train_df.columns)
+    # Scale the training data while preserving the index
+    train_df_sc = pd.DataFrame(
+        scaler.fit_transform(train_df), columns=train_df.columns, index=train_df.index
+    )
     train_df_sc.to_parquet(train_df_scaled.path)
 
-    # Scale the validation data
-    val_df_sc = pd.DataFrame(scaler.transform(val_df), columns=val_df.columns)
+    # Scale the validation data while preserving the index
+    val_df_sc = pd.DataFrame(
+        scaler.transform(val_df), columns=val_df.columns, index=val_df.index
+    )
     val_df_sc.to_parquet(val_df_scaled.path)
 
-    # Scale the test data while preserving the label column
+    # Scale the test data while preserving the label column and index
     test_labels = test_df.pop(label_column)
-    test_df_sc = pd.DataFrame(scaler.transform(test_df), columns=test_df.columns)
+    test_df_sc = pd.DataFrame(
+        scaler.transform(test_df), columns=test_df.columns, index=test_df.index
+    )
     test_df_sc[label_column] = test_labels
     test_df_sc.to_parquet(test_df_scaled.path)
