@@ -1,37 +1,11 @@
 from kfp import dsl
-from kfp.dsl import Input, Output, Dataset
+from kfp.dsl import Input, Output, Dataset, Artifact
 from typing import Dict, List, Optional
 import toml
 
 # load config
 with open("config.toml", "r") as f:
     config = toml.load(f)
-
-
-
-
-
- 
-    # @staticmethod
-    # def _create_split(
-    #     df: pd.DataFrame, ar_col: str
-    # ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    #     df_train = df[~df[ar_col]]
-    #     df_val = df[df[ar_col]]
-    #     return df_train, df_val
-
-    # logger.debug(f"Rows before na removal: {len(df)}")
-    # df = df.dropna(how="any", axis=0)
-    # logger.debug(f"Rows befor na removal: {len(df)}")
-    # df = self._assign_label_col_to_df(
-    #     df=df,
-    #     df_ar=df_ar,
-    #     ar_start_col=ar_col_dct["ar_start_ts_col"],
-    #     ar_end_col=ar_col_dct["ar_end_ts_col"],
-    #     ar_col=ar_col_dct["ar_col"],
-    # )
-    # df_train, df_val = self._create_split(df, ar_col=ar_col_dct["ar_col"])
-    # return df_train, df_val
 
 
 @dsl.container_component
@@ -210,4 +184,41 @@ def create_train_dev_test_split(
     test_df.to_parquet(df_test.path)
 
 
+@dsl.component(
+    packages_to_install=["pyarrow", "pandas", "scikit-learn==1.3.2"],
+    base_image="python:3.9",
+)
+def fit_scaler(
+    df_in: Input[Dataset],
+    scaler_type: str,
+    fitted_scaler: Output[Artifact],
+) -> None:
+    """
+    Scales the columns of a DataFrame using Min-Max scaling or Standard scaling.
+    Fits the scaler on a DataFrame using either Min-Max or Standard scaling.
 
+    Args:
+        df: The KFP Dataset Input for the dataframe the scaler should be fitted on.
+        scaler_type: Type of scaling to apply ('minmax' or 'standard').
+        scaler_object_path: KFP Output Artifact for the fitted scaler object.
+    """
+    import pandas as pd
+    from sklearn.preprocessing import MinMaxScaler, StandardScaler
+    import joblib
+
+    # read df
+    df = pd.read_parquet(df_in.path)
+
+    # Choose the appropriate scaler
+    if scaler_type == "minmax":
+        scaler = MinMaxScaler()
+    elif scaler_type == "standard":
+        scaler = StandardScaler()
+    else:
+        raise ValueError("Invalid scaler type. Choose 'minmax' or 'standard'.")
+
+    # Fit and transform the DataFrame
+    scaler = scaler.fit(df)
+
+    # Save the scaled DataFrame and scaler object
+    joblib.dump(scaler, fitted_scaler.path)

@@ -7,6 +7,7 @@ from pipeline.components import (
     run_dask_preprocessing,
     get_label_series,
     create_train_dev_test_split,
+    fit_scaler,
 )
 from container_component_src.utils import create_s3_client
 
