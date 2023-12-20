@@ -81,7 +81,7 @@ def columbus_eclss_ad_pipeline():
     )
 
     fit_scaler_task = fit_scaler(
-        df_in=split_data_task.outputs["df_val"],
+        df_in=split_data_task.outputs["df_train"],
         scaler_type="standard",
     )
 
