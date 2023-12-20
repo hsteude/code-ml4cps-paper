@@ -8,6 +8,7 @@ from pipeline.components import (
     get_label_series,
     create_train_dev_test_split,
     fit_scaler,
+    scale_dataframes,
 )
 from container_component_src.utils import create_s3_client
 
@@ -83,3 +84,11 @@ def columbus_eclss_ad_pipeline():
         df_in=split_data_task.outputs["df_val"],
         scaler_type="standard",
     )
+
+    scale_data_task = scale_dataframes(
+            train_df_in=split_data_task.outputs['df_train'],
+            val_df_in=split_data_task.outputs['df_val'],
+            test_df_in=split_data_task.outputs['df_test'],
+            scaler_in=fit_scaler_task.outputs['fitted_scaler'],
+            label_column=config['col-names']['ar_col']
+            )

@@ -223,3 +223,55 @@ def fit_scaler(
 
     # Save the scaled DataFrame and scaler object
     joblib.dump(scaler, fitted_scaler.path)
+
+
+@dsl.component(
+    packages_to_install=["pyarrow", "pandas", "scikit-learn==1.3.2"],
+    base_image="python:3.9",
+)
+def scale_dataframes(
+    train_df_in: Input[Dataset],
+    val_df_in: Input[Dataset],
+    test_df_in: Input[Dataset],
+    scaler_in: Input[Artifact],
+    label_column: str,
+    train_df_scaled: Output[Dataset],
+    val_df_scaled: Output[Dataset],
+    test_df_scaled: Output[Dataset],
+) -> None:
+    """
+    Scales the given train, validation, and test dataframes using the provided scaler.
+    Assumes that the test dataframe contains an additional column for labels.
+
+    Args:
+    train_df: KFP Dataset for DataFrame containing training data.
+    val_df: KFP Dataset for DataFrame containing validation data.
+    test_df: KFP Dataset for DataFrame containing test data, with an additional column for labels.
+    scaler: KFP Artifact for Scikit-Learn Scaler.
+    label_column: The name of the label column in the test dataframe.
+
+    Returns:
+    None: Scaled dataframes are written out as parquet files.
+    """
+    import pandas as pd
+    import joblib
+
+    # Read DataFrames and load the scaler
+    train_df, val_df, test_df = [
+        pd.read_parquet(ds.path) for ds in [train_df_in, val_df_in, test_df_in]
+    ]
+    scaler = joblib.load(scaler_in.path)
+
+    # Scale the training data
+    train_df_sc = pd.DataFrame(scaler.fit_transform(train_df), columns=train_df.columns)
+    train_df_sc.to_parquet(train_df_scaled.path)
+
+    # Scale the validation data
+    val_df_sc = pd.DataFrame(scaler.transform(val_df), columns=val_df.columns)
+    val_df_sc.to_parquet(val_df_scaled.path)
+
+    # Scale the test data while preserving the label column
+    test_labels = test_df.pop(label_column)
+    test_df_sc = pd.DataFrame(scaler.transform(test_df), columns=test_df.columns)
+    test_df_sc[label_column] = test_labels
+    test_df_sc.to_parquet(test_df_scaled.path)
