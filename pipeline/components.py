@@ -128,6 +128,7 @@ def create_train_dev_test_split(
     preproc_df_in: Input[Dataset],
     anomaly_df_in: Input[Dataset],
     window_hours: float,
+    label_col: str,
     df_train: Output[Dataset],
     df_val: Output[Dataset],
     df_test: Output[Dataset],
@@ -140,6 +141,7 @@ def create_train_dev_test_split(
     Args:
         preproc_df: KFP Dataset for preprocessed multivariate time series data.
         anomaly_df: KFP Dataset DataFrame with anomaly labels.
+        label_col: Column name for the anomaly labels
         window_hours: Size of the time window around each anomaly in hours.
         train_split: Proportion of non-test data to use for training.
 
@@ -152,7 +154,6 @@ def create_train_dev_test_split(
     # read in data
     anomaly_df = pd.read_parquet(anomaly_df_in.path)
     preproc_df = pd.read_parquet(preproc_df_in.path)
-
 
     window_size = timedelta(hours=window_hours)
 
@@ -168,15 +169,15 @@ def create_train_dev_test_split(
 
     # Splitting the dataframes and adding anomaly column to test set
     test_df = preproc_df[test_mask].copy()
-    test_df["Actual_Anomaly"] = anomaly_df["Anomaly"][test_mask]
+    test_df[label_col] = anomaly_df[label_col][test_mask]
 
     non_test_df = preproc_df[~test_mask]
 
     # Randomly splitting the non-test data into train and dev sets
     train_df = non_test_df.sample(
         frac=train_split, random_state=42
-    )  # e.g., 80% to train
-    val_df = non_test_df.drop(train_df.index)  # Remaining to dev
+    )
+    val_df = non_test_df.drop(train_df.index)
 
     # write out
     train_df.to_parquet(df_train.path)

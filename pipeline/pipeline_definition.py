@@ -74,6 +74,7 @@ def columbus_eclss_ad_pipeline():
     split_data_task = create_train_dev_test_split(
         preproc_df_in=dask_preprocessing_task.outputs["preprocessed_df"],
         anomaly_df_in=get_label_series_task.outputs["labels_series"],
+        label_col=config['col-names']['ar_col'],
         window_hours=250.0,
         train_split=0.8,
     )
