@@ -103,7 +103,7 @@ def get_label_series(
     anomaly_start_col: str,
     anomaly_end_col: str,
     ar_col: str,
-    labels_series: Output[Dataset]
+    labels_series: Output[Dataset],
 ) -> None:
     """
     Assigns an anomaly label to each row in the telemetry dataframe based on anomaly periods.
@@ -151,9 +151,9 @@ def get_label_series(
 
 @dsl.component(packages_to_install=["pyarrow", "pandas"], base_image="python:3.9")
 def create_train_dev_test_split(
-    preproc_df_in: Input[Dataset], 
-    anomaly_df_in: Input[Dataset], 
-    window_hours: float, 
+    preproc_df_in: Input[Dataset],
+    anomaly_df_in: Input[Dataset],
+    window_hours: float,
     df_train: Output[Dataset],
     df_val: Output[Dataset],
     df_test: Output[Dataset],
@@ -183,7 +183,7 @@ def create_train_dev_test_split(
     window_size = timedelta(hours=window_hours)
 
     # Identifying the timestamps of anomalies
-    anomaly_timestamps = anomaly_df.index[anomaly_df['Anomaly'] == 1]
+    anomaly_timestamps = anomaly_df.index[anomaly_df["Anomaly"] == 1]
 
     # Creating a mask for the test set
     test_mask = pd.Series(False, index=preproc_df.index)
@@ -194,12 +194,14 @@ def create_train_dev_test_split(
 
     # Splitting the dataframes and adding anomaly column to test set
     test_df = preproc_df[test_mask].copy()
-    test_df['Actual_Anomaly'] = anomaly_df['Anomaly'][test_mask]
+    test_df["Actual_Anomaly"] = anomaly_df["Anomaly"][test_mask]
 
     non_test_df = preproc_df[~test_mask]
 
     # Randomly splitting the non-test data into train and dev sets
-    train_df = non_test_df.sample(frac=train_split, random_state=42)  # e.g., 80% to train
+    train_df = non_test_df.sample(
+        frac=train_split, random_state=42
+    )  # e.g., 80% to train
     val_df = non_test_df.drop(train_df.index)  # Remaining to dev
 
     # write out

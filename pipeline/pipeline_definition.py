@@ -73,6 +73,11 @@ def columbus_eclss_ad_pipeline():
     split_data_task = create_train_dev_test_split(
         preproc_df_in=dask_preprocessing_task.outputs["preprocessed_df"],
         anomaly_df_in=get_label_series_task.outputs["labels_series"],
-        window_hours=250,
+        window_hours=250.0,
         train_split=0.8,
+    )
+
+    fit_scaler_task = fit_scaler(
+        df_in=split_data_task.outputs["df_val"],
+        scaler_type="standard",
     )
