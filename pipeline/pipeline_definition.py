@@ -7,6 +7,9 @@ from pipeline.components import (
     run_dask_preprocessing,
     get_label_series,
     create_train_dev_test_split,
+    fit_scaler,
+    scale_dataframes,
+    visualize_split,
 )
 from container_component_src.utils import create_s3_client
 
@@ -73,6 +76,27 @@ def columbus_eclss_ad_pipeline():
     split_data_task = create_train_dev_test_split(
         preproc_df_in=dask_preprocessing_task.outputs["preprocessed_df"],
         anomaly_df_in=get_label_series_task.outputs["labels_series"],
-        window_hours=250,
+        label_col=config['col-names']['ar_col'],
+        window_hours=250.0,
         train_split=0.8,
     )
+
+    fit_scaler_task = fit_scaler(
+        df_in=split_data_task.outputs["df_train"],
+        scaler_type="standard",
+    )
+
+    scale_data_task = scale_dataframes(
+            train_df_in=split_data_task.outputs['df_train'],
+            val_df_in=split_data_task.outputs['df_val'],
+            test_df_in=split_data_task.outputs['df_test'],
+            scaler_in=fit_scaler_task.outputs['fitted_scaler'],
+            label_column=config['col-names']['ar_col']
+            )
+
+    visualize_split_task = visualize_split(
+            train_df_in=scale_data_task.outputs['train_df_scaled'],
+            test_df_in=scale_data_task.outputs['test_df_scaled'],
+            column_name='AFS2_Cab_Air_Massflow_MVD',
+            sample_fraction=.1,
+            )

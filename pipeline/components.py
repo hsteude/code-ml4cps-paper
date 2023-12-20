@@ -1,37 +1,11 @@
 from kfp import dsl
-from kfp.dsl import Input, Output, Dataset
+from kfp.dsl import Input, Output, Dataset, Artifact, HTML
 from typing import Dict, List, Optional
 import toml
 
 # load config
 with open("config.toml", "r") as f:
     config = toml.load(f)
-
-
-
-
-
- 
-    # @staticmethod
-    # def _create_split(
-    #     df: pd.DataFrame, ar_col: str
-    # ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    #     df_train = df[~df[ar_col]]
-    #     df_val = df[df[ar_col]]
-    #     return df_train, df_val
-
-    # logger.debug(f"Rows before na removal: {len(df)}")
-    # df = df.dropna(how="any", axis=0)
-    # logger.debug(f"Rows befor na removal: {len(df)}")
-    # df = self._assign_label_col_to_df(
-    #     df=df,
-    #     df_ar=df_ar,
-    #     ar_start_col=ar_col_dct["ar_start_ts_col"],
-    #     ar_end_col=ar_col_dct["ar_end_ts_col"],
-    #     ar_col=ar_col_dct["ar_col"],
-    # )
-    # df_train, df_val = self._create_split(df, ar_col=ar_col_dct["ar_col"])
-    # return df_train, df_val
 
 
 @dsl.container_component
@@ -96,14 +70,16 @@ def run_dask_preprocessing(
     )
 
 
-@dsl.component(packages_to_install=["pyarrow", "pandas", "xlrd" ], base_image="python:3.9")
+@dsl.component(
+    packages_to_install=["pyarrow", "pandas", "xlrd"], base_image="python:3.9"
+)
 def get_label_series(
     df_telemetry_in: Input[Dataset],
     df_label_in: Input[Dataset],
     anomaly_start_col: str,
     anomaly_end_col: str,
     ar_col: str,
-    labels_series: Output[Dataset]
+    labels_series: Output[Dataset],
 ) -> None:
     """
     Assigns an anomaly label to each row in the telemetry dataframe based on anomaly periods.
@@ -151,9 +127,10 @@ def get_label_series(
 
 @dsl.component(packages_to_install=["pyarrow", "pandas"], base_image="python:3.9")
 def create_train_dev_test_split(
-    preproc_df_in: Input[Dataset], 
-    anomaly_df_in: Input[Dataset], 
-    window_hours: float, 
+    preproc_df_in: Input[Dataset],
+    anomaly_df_in: Input[Dataset],
+    window_hours: float,
+    label_col: str,
     df_train: Output[Dataset],
     df_val: Output[Dataset],
     df_test: Output[Dataset],
@@ -164,10 +141,11 @@ def create_train_dev_test_split(
     time window around each anomaly and a column indicating actual anomalies.
 
     Args:
-        preproc_df (pd.DataFrame): Preprocessed multivariate time series data.
-        anomaly_df (pd.DataFrame): DataFrame with anomaly labels.
-        window_hours (float): Size of the time window around each anomaly in hours.
-        train_split (float): Proportion of non-test data to use for training.
+        preproc_df: KFP Dataset for preprocessed multivariate time series data.
+        anomaly_df: KFP Dataset DataFrame with anomaly labels.
+        label_col: Column name for the anomaly labels
+        window_hours: Size of the time window around each anomaly in hours.
+        train_split: Proportion of non-test data to use for training.
 
     Returns:
         tuple: Three DataFrames corresponding to the train, dev, and test sets.
@@ -179,11 +157,10 @@ def create_train_dev_test_split(
     anomaly_df = pd.read_parquet(anomaly_df_in.path)
     preproc_df = pd.read_parquet(preproc_df_in.path)
 
-
     window_size = timedelta(hours=window_hours)
 
     # Identifying the timestamps of anomalies
-    anomaly_timestamps = anomaly_df.index[anomaly_df['Anomaly'] == 1]
+    anomaly_timestamps = anomaly_df.index[anomaly_df["Anomaly"] == 1]
 
     # Creating a mask for the test set
     test_mask = pd.Series(False, index=preproc_df.index)
@@ -194,13 +171,13 @@ def create_train_dev_test_split(
 
     # Splitting the dataframes and adding anomaly column to test set
     test_df = preproc_df[test_mask].copy()
-    test_df['Actual_Anomaly'] = anomaly_df['Anomaly'][test_mask]
+    test_df[label_col] = anomaly_df[label_col][test_mask]
 
     non_test_df = preproc_df[~test_mask]
 
     # Randomly splitting the non-test data into train and dev sets
-    train_df = non_test_df.sample(frac=train_split, random_state=42)  # e.g., 80% to train
-    val_df = non_test_df.drop(train_df.index)  # Remaining to dev
+    train_df = non_test_df.sample(frac=train_split, random_state=42)
+    val_df = non_test_df.drop(train_df.index)
 
     # write out
     train_df.to_parquet(df_train.path)
@@ -208,4 +185,169 @@ def create_train_dev_test_split(
     test_df.to_parquet(df_test.path)
 
 
+@dsl.component(
+    packages_to_install=["pyarrow", "pandas", "scikit-learn==1.3.2"],
+    base_image="python:3.9",
+)
+def fit_scaler(
+    df_in: Input[Dataset],
+    scaler_type: str,
+    fitted_scaler: Output[Artifact],
+) -> None:
+    """
+    Scales the columns of a DataFrame using Min-Max scaling or Standard scaling.
+    Fits the scaler on a DataFrame using either Min-Max or Standard scaling.
 
+    Args:
+        df: The KFP Dataset Input for the dataframe the scaler should be fitted on.
+        scaler_type: Type of scaling to apply ('minmax' or 'standard').
+        scaler_object_path: KFP Output Artifact for the fitted scaler object.
+    """
+    import pandas as pd
+    from sklearn.preprocessing import MinMaxScaler, StandardScaler
+    import joblib
+
+    # read df
+    df = pd.read_parquet(df_in.path)
+
+    # Choose the appropriate scaler
+    if scaler_type == "minmax":
+        scaler = MinMaxScaler()
+    elif scaler_type == "standard":
+        scaler = StandardScaler()
+    else:
+        raise ValueError("Invalid scaler type. Choose 'minmax' or 'standard'.")
+
+    # Fit and transform the DataFrame
+    scaler = scaler.fit(df)
+
+    # Save the scaled DataFrame and scaler object
+    joblib.dump(scaler, fitted_scaler.path)
+
+
+@dsl.component(
+    packages_to_install=["pyarrow", "pandas", "scikit-learn==1.3.2"],
+    base_image="python:3.9",
+)
+def scale_dataframes(
+    train_df_in: Input[Dataset],
+    val_df_in: Input[Dataset],
+    test_df_in: Input[Dataset],
+    scaler_in: Input[Artifact],
+    label_column: str,
+    train_df_scaled: Output[Dataset],
+    val_df_scaled: Output[Dataset],
+    test_df_scaled: Output[Dataset],
+) -> None:
+    """
+    Scales the given train, validation, and test dataframes using the provided scaler.
+    Assumes that the test dataframe contains an additional column for labels.
+    """
+    import pandas as pd
+    import joblib
+
+    # Read DataFrames and load the scaler
+    train_df, val_df, test_df = [
+        pd.read_parquet(ds.path) for ds in [train_df_in, val_df_in, test_df_in]
+    ]
+    scaler = joblib.load(scaler_in.path)
+
+    # Scale the training data while preserving the index
+    train_df_sc = pd.DataFrame(
+        scaler.fit_transform(train_df), columns=train_df.columns, index=train_df.index
+    )
+    train_df_sc.to_parquet(train_df_scaled.path)
+
+    # Scale the validation data while preserving the index
+    val_df_sc = pd.DataFrame(
+        scaler.transform(val_df), columns=val_df.columns, index=val_df.index
+    )
+    val_df_sc.to_parquet(val_df_scaled.path)
+
+    # Scale the test data while preserving the label column and index
+    test_labels = test_df.pop(label_column)
+    test_df_sc = pd.DataFrame(
+        scaler.transform(test_df), columns=test_df.columns, index=test_df.index
+    )
+    test_df_sc[label_column] = test_labels
+    test_df_sc.to_parquet(test_df_scaled.path)
+
+
+@dsl.component(
+    packages_to_install=["pyarrow", "pandas", "plotly==5.3.1"],
+    base_image="python:3.9",
+)
+def visualize_split(
+    train_df_in: Input[Dataset],
+    test_df_in: Input[Dataset],
+    column_name: str,
+    plot_html: Output[HTML],
+    sample_fraction: float = 0.1,
+) -> None:
+    """
+    Creates a Plotly plot visualizing the specified column from sampled train and test dataframes,
+    and the anomaly column from the test dataframe, and saves it as an HTML file.
+
+    Args:
+        train_df_in: KFP Dataset Input for the training dataframe.
+        test_df_in: KFP Dataset Input for the testing dataframe.
+        column_name: Name of the column to be plotted.
+        plot_html: KFP Output Artifact for the Plotly plot HTML.
+        sample_fraction: Fraction of data to sample for plotting (default 0.1).
+    """
+    import pandas as pd
+    import plotly.graph_objects as go
+
+    # Read DataFrames
+    train_df = pd.read_parquet(train_df_in.path)
+    test_df = pd.read_parquet(test_df_in.path)
+
+    # Sample the dataframes
+    train_df_sampled = train_df.sample(
+        frac=sample_fraction, random_state=42
+    ).sort_index()
+    test_df_sampled = test_df.sample(frac=sample_fraction, random_state=42).sort_index()
+
+    # Create Plotly figure
+    fig = go.Figure()
+
+    # Scatter plot for the sampled train dataframe
+    fig.add_trace(
+        go.Scatter(
+            x=train_df_sampled.index,
+            y=train_df_sampled[column_name],
+            mode="markers",
+            name="Train Data",
+            marker=dict(size=3),
+        )
+    )
+
+    # Scatter plot for the sampled test dataframe
+    fig.add_trace(
+        go.Scatter(
+            x=test_df_sampled.index,
+            y=test_df_sampled[column_name],
+            mode="markers",
+            name="Test Data",
+            marker=dict(size=3),
+        )
+    )
+
+    # Line plot for the anomalies in the test dataframe
+    fig.add_trace(
+        go.Scatter(
+            x=test_df_sampled.index,
+            y=test_df_sampled["Anomaly"],
+            mode="lines",
+            name="Anomalies",
+        )
+    )
+
+    fig.update_layout(
+        title=f"Visualization of train test split trough random telemetry parameter",
+        xaxis_title="Timestamp",
+        yaxis_title='Random telemetry parameter',
+    )
+
+    # Save the plot as HTML
+    fig.write_html(plot_html.path)
