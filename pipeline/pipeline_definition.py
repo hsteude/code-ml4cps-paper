@@ -10,6 +10,7 @@ from pipeline.components import (
     fit_scaler,
     scale_dataframes,
     visualize_split,
+    run_katib_experiment
 )
 from container_component_src.utils import create_s3_client
 
@@ -76,7 +77,7 @@ def columbus_eclss_ad_pipeline():
     split_data_task = create_train_dev_test_split(
         preproc_df_in=dask_preprocessing_task.outputs["preprocessed_df"],
         anomaly_df_in=get_label_series_task.outputs["labels_series"],
-        label_col=config['col-names']['ar_col'],
+        label_col=config["col-names"]["ar_col"],
         window_hours=250.0,
         train_split=0.8,
     )
@@ -87,16 +88,30 @@ def columbus_eclss_ad_pipeline():
     )
 
     scale_data_task = scale_dataframes(
-            train_df_in=split_data_task.outputs['df_train'],
-            val_df_in=split_data_task.outputs['df_val'],
-            test_df_in=split_data_task.outputs['df_test'],
-            scaler_in=fit_scaler_task.outputs['fitted_scaler'],
-            label_column=config['col-names']['ar_col']
-            )
+        train_df_in=split_data_task.outputs["df_train"],
+        val_df_in=split_data_task.outputs["df_val"],
+        test_df_in=split_data_task.outputs["df_test"],
+        scaler_in=fit_scaler_task.outputs["fitted_scaler"],
+        label_column=config["col-names"]["ar_col"],
+    )
 
     visualize_split_task = visualize_split(
-            train_df_in=scale_data_task.outputs['train_df_scaled'],
-            test_df_in=scale_data_task.outputs['test_df_scaled'],
-            column_name='AFS2_Cab_Air_Massflow_MVD',
-            sample_fraction=.1,
-            )
+        train_df_in=scale_data_task.outputs["train_df_scaled"],
+        test_df_in=scale_data_task.outputs["test_df_scaled"],
+        column_name="AFS2_Cab_Air_Massflow_MVD",
+        sample_fraction=0.1,
+    )
+
+    katib_task = run_katib_experiment(
+        df_train=scale_data_task.outputs["train_df_scaled"],
+        df_val=scale_data_task.outputs["val_df_scaled"],
+        experiment_name="columbus-anomaly-detection-ml4cps",
+        image=f'{config["images"]["eclss-ad-image"]}:commit-3227572c',
+        namespace="henrik-steude",
+        max_epochs=200,
+        max_trials=50,
+        batch_size_list=["32", "64", "128", "256"],
+        beta_list=["0.0001", "0.5", "0.1", "1"],
+        learning_rate_list=["0.0005", "0.001", "0.005"],
+        latent_dim=10,
+    )
