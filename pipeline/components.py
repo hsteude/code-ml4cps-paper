@@ -164,10 +164,10 @@ def create_train_dev_test_split(
     time window around each anomaly and a column indicating actual anomalies.
 
     Args:
-        preproc_df (pd.DataFrame): Preprocessed multivariate time series data.
-        anomaly_df (pd.DataFrame): DataFrame with anomaly labels.
-        window_hours (float): Size of the time window around each anomaly in hours.
-        train_split (float): Proportion of non-test data to use for training.
+        preproc_df: KFP Dataset for preprocessed multivariate time series data.
+        anomaly_df: KFP Dataset DataFrame with anomaly labels.
+        window_hours: Size of the time window around each anomaly in hours.
+        train_split: Proportion of non-test data to use for training.
 
     Returns:
         tuple: Three DataFrames corresponding to the train, dev, and test sets.
