@@ -1,5 +1,5 @@
 from kfp import dsl
-from kfp.dsl import Input, Output, Dataset, Artifact
+from kfp.dsl import Input, Output, Dataset, Artifact, HTML
 from typing import Dict, List, Optional
 import toml
 
@@ -271,3 +271,83 @@ def scale_dataframes(
     )
     test_df_sc[label_column] = test_labels
     test_df_sc.to_parquet(test_df_scaled.path)
+
+
+@dsl.component(
+    packages_to_install=["pyarrow", "pandas", "plotly==5.3.1"],
+    base_image="python:3.9",
+)
+def visualize_split(
+    train_df_in: Input[Dataset],
+    test_df_in: Input[Dataset],
+    column_name: str,
+    plot_html: Output[HTML],
+    sample_fraction: float = 0.1,
+) -> None:
+    """
+    Creates a Plotly plot visualizing the specified column from sampled train and test dataframes,
+    and the anomaly column from the test dataframe, and saves it as an HTML file.
+
+    Args:
+        train_df_in: KFP Dataset Input for the training dataframe.
+        test_df_in: KFP Dataset Input for the testing dataframe.
+        column_name: Name of the column to be plotted.
+        plot_html: KFP Output Artifact for the Plotly plot HTML.
+        sample_fraction: Fraction of data to sample for plotting (default 0.1).
+    """
+    import pandas as pd
+    import plotly.graph_objects as go
+
+    # Read DataFrames
+    train_df = pd.read_parquet(train_df_in.path)
+    test_df = pd.read_parquet(test_df_in.path)
+
+    # Sample the dataframes
+    train_df_sampled = train_df.sample(
+        frac=sample_fraction, random_state=42
+    ).sort_index()
+    test_df_sampled = test_df.sample(frac=sample_fraction, random_state=42).sort_index()
+
+    # Create Plotly figure
+    fig = go.Figure()
+
+    # Scatter plot for the sampled train dataframe
+    fig.add_trace(
+        go.Scatter(
+            x=train_df_sampled.index,
+            y=train_df_sampled[column_name],
+            mode="markers",
+            name="Train Data",
+            marker=dict(size=3),
+        )
+    )
+
+    # Scatter plot for the sampled test dataframe
+    fig.add_trace(
+        go.Scatter(
+            x=test_df_sampled.index,
+            y=test_df_sampled[column_name],
+            mode="markers",
+            name="Test Data",
+            marker=dict(size=3),
+        )
+    )
+
+    # Line plot for the anomalies in the test dataframe
+    fig.add_trace(
+        go.Scatter(
+            x=test_df_sampled.index,
+            y=test_df_sampled["Anomaly"],
+            mode="lines",
+            name="Anomalies",
+        )
+    )
+
+    fig.update_layout(
+        title=f"Visualization of train test split trough random telemetry parameter",
+        xaxis_title="Timestamp",
+        yaxis_title='Random telemetry parameter',
+    )
+
+    # Save the plot as HTML
+    fig.write_html(plot_html.path)

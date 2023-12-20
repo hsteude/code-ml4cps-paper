@@ -9,6 +9,7 @@ from pipeline.components import (
     create_train_dev_test_split,
     fit_scaler,
     scale_dataframes,
+    visualize_split,
 )
 from container_component_src.utils import create_s3_client
 
@@ -91,4 +92,11 @@ def columbus_eclss_ad_pipeline():
             test_df_in=split_data_task.outputs['df_test'],
             scaler_in=fit_scaler_task.outputs['fitted_scaler'],
             label_column=config['col-names']['ar_col']
+            )
+
+    visualize_split_task = visualize_split(
+            train_df_in=scale_data_task.outputs['train_df_scaled'],
+            test_df_in=scale_data_task.outputs['test_df_scaled'],
+            column_name='AFS2_Cab_Air_Massflow_MVD',
+            sample_fraction=.1,
             )
