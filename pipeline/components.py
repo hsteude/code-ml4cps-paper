@@ -70,7 +70,9 @@ def run_dask_preprocessing(
     )
 
 
-@dsl.component(packages_to_install=["pyarrow", "pandas", "xlrd" ], base_image="python:3.9")
+@dsl.component(
+    packages_to_install=["pyarrow", "pandas", "xlrd"], base_image="python:3.9"
+)
 def get_label_series(
     df_telemetry_in: Input[Dataset],
     df_label_in: Input[Dataset],
@@ -174,9 +176,7 @@ def create_train_dev_test_split(
     non_test_df = preproc_df[~test_mask]
 
     # Randomly splitting the non-test data into train and dev sets
-    train_df = non_test_df.sample(
-        frac=train_split, random_state=42
-    )
+    train_df = non_test_df.sample(frac=train_split, random_state=42)
     val_df = non_test_df.drop(train_df.index)
 
     # write out
