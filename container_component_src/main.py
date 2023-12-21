@@ -1,13 +1,22 @@
 import click
 import os
 from typing import Optional, List
+import pytorch_lightning as pl
 import re
 import pyarrow.parquet as pq
 from loguru import logger
-from container_component_src.utils import create_s3_client
+from container_component_src.utils import create_s3_client, read_data_from_minio
 from container_component_src.dask_preprocessor.preprocessor import DaskPreprocessor
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.plugins.environments import KubeflowEnvironment
 import toml
 import pandas as pd
+import numpy as np
+from pytorch_lightning import seed_everything
+import torch
+from container_component_src.model.datamodule import TimeStampDataModule
+from container_component_src.model.lightning_module import TimeStampVAE
+from container_component_src.model.callbacks import StdOutLoggerCallback, ResetLogVarCallback
 
 # load config
 with open("config.toml", "r") as f:
@@ -95,7 +104,6 @@ def split_parquet_file(
     logger.info(f"Completed splitting {file_path} into multiple files in {bucket_name}")
 
 
-
 @cli.command("run_dask_preprocessing")
 @click.option("--partitioned-telemetry-paths", type=str)
 @click.option("--sample-frac", type=float)
@@ -139,6 +147,118 @@ def run_dask_preprocessing(
     )
     df = prc.run(path_list=partitioned_telemetry_paths, timestamp_col=timestamp_col)
     df.to_parquet(df_out_path)
+
+
+@cli.command("run_training")
+@click.option('--train-df-path', type=str, required=True)
+@click.option('--val-df-path', type=str, required=True)
+@click.option('--seed', type=int, required=True)
+@click.option('--batch-size', type=int, required=True)
+@click.option('--latent-dim', type=int, required=True)
+@click.option('--hidden-dims', type=int, required=True)
+@click.option('--beta', type=float, required=True)
+@click.option('--lr', type=float, required=True)
+@click.option('--early-stopping-patience', type=int, required=True)
+@click.option('--max-epochs', type=int, required=True)
+@click.option('--num-gpu-nodes', type=int, required=True)
+@click.option('--run-as-pytorchjob', type=bool, required=True)
+@click.option('--model-output-file', type=str, required=True)
+def run_training(
+    train_df_path: str, 
+    val_df_path: str, 
+    seed: int, 
+    batch_size: int, 
+    latent_dim: int, 
+    hidden_dims: int, 
+    beta: float, 
+    lr: float, 
+    early_stopping_patience: int, 
+    max_epochs: int, 
+    num_gpu_nodes: int, 
+    run_as_pytorchjob: bool, 
+    model_output_file: str
+):
+    """
+    Startet das Training des Modells.
+
+    Args:
+    train_df_path: Pfad zum trainierten DataFrame.
+    val_df_path: Pfad zum validierten DataFrame.
+    seed: Seed für Zufallszahlen-Generatoren.
+    batch_size: Batchgröße für das Training.
+    latent_dim: Dimension des latenten Raums.
+    hidden_dims: Dimension der versteckten Schichten.
+    beta: Gewichtungsfaktor für KL-Divergenz im VAE-Verlust.
+    lr: Lernrate für den Optimierer.
+    early_stopping_patience: Geduld für das frühe Beenden des Trainings.
+    max_epochs: Maximale Anzahl von Epochen.
+    num_gpu_nodes: Anzahl der zu verwendenden GPU-Nodes.
+    run_as_pytorchjob: Gibt an, ob das Training als PyTorch-Job ausgeführt wird.
+    model_output_file: Dateiname, unter dem das trainierte Modell gespeichert wird.
+    """
+    seed_everything(seed)
+    np.random.seed(seed)
+    logger.info(f"Random seed in training script set to {seed}")
+    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+    torch.set_float32_matmul_precision("high")
+
+    # load dataset and initiate data module
+    train_df = read_data_from_minio(train_df_path)
+    val_df = read_data_from_minio(val_df_path)
+    dm = TimeStampDataModule(train_df=train_df, val_df=val_df, batch_size=batch_size)
+    dm.setup()
+
+    # initiate model
+    model = TimeStampVAE(
+        input_dim=len(train_df.columns),
+        latent_dim=latent_dim,
+        hidden_dims=hidden_dims,
+        beta=beta,
+        lr=lr,
+    )
+
+    # early stopping callback
+    early_stop_callback = EarlyStopping(
+        monitor="val_loss",
+        mode="min",
+        patience=early_stopping_patience,
+        strict=True,
+    )
+
+    # saves top-K checkpoints based on "val_loss" metric
+    os.makedirs("data", exist_ok=True)
+    checkpoint_callback = ModelCheckpoint(
+        save_top_k=1,
+        monitor="val_loss",
+        mode="min",
+        dirpath="data/",
+        filename=model_output_file,
+    )
+
+    trainer = pl.Trainer(
+        max_epochs=max_epochs,
+        accelerator=accelerator,
+        plugins=[KubeflowEnvironment()] if run_as_pytorchjob else [],
+        devices=1,
+        callbacks=[
+            checkpoint_callback,
+            early_stop_callback,
+            StdOutLoggerCallback(),
+            ResetLogVarCallback(reset_epochs=5, reset_value=-2)
+        ],
+        num_nodes=num_gpu_nodes,
+        strategy="ddp" if run_as_pytorchjob else "auto",
+    )
+
+    # Log relevant trainer attributes
+    if run_as_pytorchjob:
+        logger.debug(f"Trainer accelerator: {trainer.accelerator}")
+        logger.debug(f"Trainer strategy: {trainer.strategy}")
+        logger.debug(f"Trainer global_rank: {trainer.global_rank}")
+        logger.debug(f"Trainer local_rank: {trainer.local_rank}")
+
+    trainer.fit(model=model, datamodule=dm)
+
 
 
 if __name__ == "__main__":

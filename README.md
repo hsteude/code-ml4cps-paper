@@ -157,3 +157,22 @@ Install ipykernel for this virtual environment:
 ```sh
 poetry run ipython kernel install --name "ml4cps" --user
 ```
+
+Run Pytorch trianing locally in a notebook pod
+```sh
+poetry run python main.py run_training \
+  --train-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/train_df_scaled" \
+  --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/val_df_scaled" \
+  --seed 42 \
+  --batch-size 32 \
+  --latent-dim 10 \
+  --hidden-dims 100 \
+  --beta 0.5 \
+  --lr 0.001 \
+  --early-stopping-patience 30 \
+  --max-epochs 10 \
+  --num-gpu-nodes 1 \
+  --run-as-pytorchjob False \
+  --model-output-file "local_test_model"
+
+```

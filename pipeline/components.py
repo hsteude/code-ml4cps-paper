@@ -346,8 +346,183 @@ def visualize_split(
     fig.update_layout(
         title=f"Visualization of train test split trough random telemetry parameter",
         xaxis_title="Timestamp",
-        yaxis_title='Random telemetry parameter',
+        yaxis_title="Random telemetry parameter",
     )
 
     # Save the plot as HTML
     fig.write_html(plot_html.path)
+
+
+@dsl.component(
+    packages_to_install=["kubernetes", "loguru"],
+    base_image="python:3.9",
+)
+def run_katib_experiment(
+    df_train: Input[Dataset],
+    df_val: Input[Dataset],
+    experiment_name: str,
+    image: str,
+    namespace: str,
+    max_epochs: int,
+    max_trials: int,
+    batch_size_list: List[str],
+    beta_list: List[str],
+    learning_rate_list: List[str],
+    latent_dim: int,
+) -> Dict:
+    import time
+    from kubernetes import client, config
+    from loguru import logger
+
+    group = "kubeflow.org"
+    version = "v1beta1"
+    plural = "experiments"
+    # Command List
+    command_list = [
+        "python",
+        "container_component_src/main.py",
+        "run_training",
+        f"--train-df-path={df_train.path}",
+        f"--val-df-path={df_val.path}",
+        "--seed=42",
+        "--batch-size=${trialParameters.batchSize}",
+        f"--latent-dim={latent_dim}",
+        "--hidden-dims=100",
+        "--beta=${trialParameters.beta}",
+        "--lr=${trialParameters.learningRate}",
+        "--early-stopping-patience=30",
+        f"--max-epochs={max_epochs}",
+        "--num-gpu-nodes=1",
+        "--run-as-pytorchjob=False",
+        "--model-output-file=local_test_model",
+    ]
+
+
+    # Environment Dictionary
+    env_dict = [
+        {
+            "name": "AWS_ACCESS_KEY_ID",
+            "valueFrom": {
+                "secretKeyRef": {"name": "s3creds", "key": "AWS_ACCESS_KEY_ID"}
+            },
+        },
+        {
+            "name": "AWS_SECRET_ACCESS_KEY",
+            "valueFrom": {
+                "secretKeyRef": {"name": "s3creds", "key": "AWS_SECRET_ACCESS_KEY"}
+            },
+        },
+        {"name": "S3_ENDPOINT", "value": "minio.minio"},
+        {"name": "S3_USE_HTTPS", "value": "0"},
+        {"name": "S3_VERIFY_SSL", "value": "0"},
+    ]
+
+    # Spec Dictionary
+    spec_dict = {
+        "template": {
+            "metadata": {"annotations": {"sidecar.istio.io/inject": "false"}},
+            "spec": {
+                "containers": [
+                    {
+                        "name": "training-container",
+                        "image": image,
+                        "resources": {"limits": {"nvidia.com/gpu": 1}},
+                        "command": command_list,
+                        "env": env_dict,
+                        "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
+                    }
+                ],
+                "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                "restartPolicy": "Never",
+            },
+        }
+    }
+
+    # Trial Template Dictionary
+    trial_template_dict = {
+        "primaryContainerName": "training-container",
+        "trialParameters": [
+            {
+                "name": "learningRate",
+                "description": "Learning rate for the training model",
+                "reference": "learning_rate",
+            },
+            {
+                "name": "batchSize",
+                "description": "Batch size for training",
+                "reference": "batch_size",
+            },
+            {
+                "name": "beta",
+                "description": "beta in beta vae loss function",
+                "reference": "beta",
+            },
+        ],
+        "trialSpec": {"apiVersion": "batch/v1", "kind": "Job", "spec": spec_dict},
+    }
+
+    experiment_config = {
+        "apiVersion": "kubeflow.org/v1beta1",
+        "kind": "Experiment",
+        "metadata": {"name": experiment_name, "namespace": namespace},
+        "spec": {
+            "parallelTrialCount": 3,
+            "maxTrialCount": max_trials,
+            "maxFailedTrialCount": 3,
+            "metricsCollectorSpec": {"collector": {"kind": "StdOut"}},
+            "objective": {
+                "type": "minimize",
+                "goal": -100_000,
+                "objectiveMetricName": "val_loss",
+                "additionalMetricNames": ["train_loss"],
+            },
+            "algorithm": {"algorithmName": "bayesianoptimization"},
+            "parameters": [
+                {
+                    "name": "learning_rate",
+                    "parameterType": "discrete",
+                    "feasibleSpace": {"list": learning_rate_list},
+                },
+                {
+                    "name": "batch_size",
+                    "parameterType": "discrete",
+                    "feasibleSpace": {"list": batch_size_list},
+                },
+                {
+                    "name": "beta",
+                    "parameterType": "discrete",
+                    "feasibleSpace": {"list": beta_list},
+                },
+            ],
+            "trialTemplate": trial_template_dict,
+        },
+    }
+
+    config.load_incluster_config()
+
+    k8s_client = client.ApiClient()
+
+    katib_api_instance = client.CustomObjectsApi(k8s_client)
+    katib_api_instance.create_namespaced_custom_object(
+        group, version, namespace, plural, experiment_config
+    )
+    time.sleep(60)
+    logger.info(f"Experiment {experiment_name} submitted. Waiting for completion...")
+
+    while True:
+        response = katib_api_instance.get_namespaced_custom_object(
+            group, version, namespace, plural, experiment_name
+        )
+
+        status = response["status"]["conditions"][-1]["type"]
+        if status == "Succeeded":
+            result = response
+            break
+        elif status == "Failed":
+            raise Exception(f"Experiment {experiment_name} failed!")
+
+        logger.info(f"Experiment {experiment_name} running. Waiting for completion...")
+        time.sleep(60)
+
+    best_trial = result["status"]["currentOptimalTrial"]["parameterAssignments"]
+    return {b["name"]: b["value"] for b in best_trial}

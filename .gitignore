@@ -161,4 +161,6 @@ cython_debug/
 #
 #
 local_data/*
+data/*
 !local_data/.gitkeep
+lightning_logs/*
