@@ -117,15 +117,15 @@ def columbus_eclss_ad_pipeline():
         latent_dim=10,
     )
 
-    train_multi_latent_tcn_vae_model_task = run_pytorch_training_job(
+    train_model_task = run_pytorch_training_job(
         train_df_in=scale_data_task.outputs["train_df_scaled"],
         val_df_in=scale_data_task.outputs["val_df_scaled"],
         minio_model_bucket="eclss-model-bucket",
-        training_image=f'{config["images"]["eclss-ad-image"]}:commit-324f8fd2',
+        training_image=f'{config["images"]["eclss-ad-image"]}:commit-54a94e12',
         namespace="henrik-steude",
         num_dl_workers=12,
         tuning_param_dct=katib_task.output,
-        max_epochs=100,
+        max_epochs=10,
         early_stopping_patience=30,
         latent_dim=10,
         num_gpu_nodes=3,

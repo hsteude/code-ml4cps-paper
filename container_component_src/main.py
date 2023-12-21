@@ -276,6 +276,7 @@ def run_training(
         logger.debug(f"Trainer local_rank: {trainer.local_rank}")
 
     trainer.fit(model=model, datamodule=dm)
+    trainer.save_checkpoint(model_output_file)
     if minio_model_bucket:
         upload_file_to_minio_bucket(minio_model_bucket, model_output_file)
 
