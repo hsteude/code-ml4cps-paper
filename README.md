@@ -28,6 +28,11 @@ The repository structure is outlined below:
 │   ├── dask_preprocessor
 │   │   ├── __init__.py
 │   │   └── preprocessor.py
+│   ├── model
+│   │   ├── __init__.py
+│   │   ├── callbacks.py
+│   │   ├── datamodule.py
+│   │   └── lightning_module.py
 │   ├── __init__.py
 │   ├── main.py
 │   └── utils.py
