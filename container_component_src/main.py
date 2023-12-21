@@ -16,7 +16,7 @@ from pytorch_lightning import seed_everything
 import torch
 from container_component_src.model.datamodule import TimeStampDataModule
 from container_component_src.model.lightning_module import TimeStampVAE
-from container_component_src.model.callbacks import StdOutLoggerCallback
+from container_component_src.model.callbacks import StdOutLoggerCallback, ResetLogVarCallback
 
 # load config
 with open("config.toml", "r") as f:
@@ -244,6 +244,7 @@ def run_training(
             checkpoint_callback,
             early_stop_callback,
             StdOutLoggerCallback(),
+            ResetLogVarCallback(reset_epochs=5, reset_value=-2)
         ],
         num_nodes=num_gpu_nodes,
         strategy="ddp" if run_as_pytorchjob else "auto",
