@@ -40,12 +40,14 @@ class TimeStampDataModule(pl.LightningDataModule):
         val_df: pd.DataFrame,
         test_df: Optional[pd.DataFrame] = None,
         batch_size: int = 32,
+        num_workers: Optional[int] = 0
     ):
         super().__init__()
         self.train_df = train_df
         self.val_df = val_df
         self.test_df = test_df
         self.batch_size = batch_size
+        self.num_workers = num_workers
 
     def setup(self, stage: str = None) -> None:
         self.train_dataset = TimeStampDataset(self.train_df)
@@ -54,12 +56,25 @@ class TimeStampDataModule(pl.LightningDataModule):
             self.test_dataset = TimeStampDataset(self.test_df)
 
     def train_dataloader(self) -> DataLoader:
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(self.val_dataset, batch_size=self.batch_size)
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+        )
 
     def test_dataloader(self) -> Optional[DataLoader]:
         if self.test_df is not None:
-            return DataLoader(self.test_dataset, batch_size=self.batch_size)
+            return DataLoader(
+                self.test_dataset,
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+            )
         return None

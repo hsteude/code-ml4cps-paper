@@ -1,6 +1,7 @@
 import s3fs
 import os
 import pandas as pd
+from loguru import logger
 
 
 def create_s3_client() -> s3fs.S3FileSystem:
@@ -54,3 +55,20 @@ def read_data_from_minio(df_path: str) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Error while reading from MinIO: {str(e)}")
         raise e
+
+
+def upload_file_to_minio_bucket(bucket: str, file: str):
+    """Uploads the file to the bucket ..."""
+    fs = create_s3_client()
+    if bucket not in fs.ls("/"):
+        logger.info(f"Creating bucket {bucket}, cause it did not exist")
+        fs.mkdir(f"/{bucket}")
+    if os.path.exists(file):
+        logger.info(
+            f'Attempting to upload this file "{file}" to this bucket "{bucket}"'
+        )
+        fs.put(file, f"{bucket}/{os.path.basename(file)}")
+    else:
+        logger.error(
+            f'File "{file}" does not exist and cannot be uploaded to bucket "{bucket}"'
+        )

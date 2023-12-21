@@ -5,7 +5,11 @@ import pytorch_lightning as pl
 import re
 import pyarrow.parquet as pq
 from loguru import logger
-from container_component_src.utils import create_s3_client, read_data_from_minio
+from container_component_src.utils import (
+    create_s3_client,
+    read_data_from_minio,
+    upload_file_to_minio_bucket,
+)
 from container_component_src.dask_preprocessor.preprocessor import DaskPreprocessor
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.plugins.environments import KubeflowEnvironment
@@ -16,7 +20,10 @@ from pytorch_lightning import seed_everything
 import torch
 from container_component_src.model.datamodule import TimeStampDataModule
 from container_component_src.model.lightning_module import TimeStampVAE
-from container_component_src.model.callbacks import StdOutLoggerCallback, ResetLogVarCallback
+from container_component_src.model.callbacks import (
+    StdOutLoggerCallback,
+    ResetLogVarCallback,
+)
 
 # load config
 with open("config.toml", "r") as f:
@@ -150,51 +157,57 @@ def run_dask_preprocessing(
 
 
 @cli.command("run_training")
-@click.option('--train-df-path', type=str, required=True)
-@click.option('--val-df-path', type=str, required=True)
-@click.option('--seed', type=int, required=True)
-@click.option('--batch-size', type=int, required=True)
-@click.option('--latent-dim', type=int, required=True)
-@click.option('--hidden-dims', type=int, required=True)
-@click.option('--beta', type=float, required=True)
-@click.option('--lr', type=float, required=True)
-@click.option('--early-stopping-patience', type=int, required=True)
-@click.option('--max-epochs', type=int, required=True)
-@click.option('--num-gpu-nodes', type=int, required=True)
-@click.option('--run-as-pytorchjob', type=bool, required=True)
-@click.option('--model-output-file', type=str, required=True)
+@click.option("--train-df-path", type=str, required=True)
+@click.option("--val-df-path", type=str, required=True)
+@click.option("--seed", type=int, required=True)
+@click.option("--batch-size", type=int, required=True)
+@click.option("--latent-dim", type=int, required=True)
+@click.option("--hidden-dims", type=int, required=True)
+@click.option("--beta", type=float, required=True)
+@click.option("--lr", type=float, required=True)
+@click.option("--early-stopping-patience", type=int, required=True)
+@click.option("--max-epochs", type=int, required=True)
+@click.option("--num-gpu-nodes", type=int, required=True)
+@click.option("--num-dl-workers", type=int, required=True)
+@click.option("--run-as-pytorchjob", type=bool, required=True)
+@click.option("--model-output-file", type=str, required=True)
+@click.option("--minio-model-bucket", type=str, required=False)
 def run_training(
-    train_df_path: str, 
-    val_df_path: str, 
-    seed: int, 
-    batch_size: int, 
-    latent_dim: int, 
-    hidden_dims: int, 
-    beta: float, 
-    lr: float, 
-    early_stopping_patience: int, 
-    max_epochs: int, 
-    num_gpu_nodes: int, 
-    run_as_pytorchjob: bool, 
-    model_output_file: str
+    train_df_path: str,
+    val_df_path: str,
+    seed: int,
+    batch_size: int,
+    latent_dim: int,
+    hidden_dims: int,
+    beta: float,
+    lr: float,
+    early_stopping_patience: int,
+    max_epochs: int,
+    num_gpu_nodes: int,
+    num_dl_workers: int,
+    run_as_pytorchjob: bool,
+    model_output_file: str,
+    minio_model_bucket: Optional[str],
 ):
     """
-    Startet das Training des Modells.
+    Starts the training of the model.
 
     Args:
-    train_df_path: Pfad zum trainierten DataFrame.
-    val_df_path: Pfad zum validierten DataFrame.
-    seed: Seed für Zufallszahlen-Generatoren.
-    batch_size: Batchgröße für das Training.
-    latent_dim: Dimension des latenten Raums.
-    hidden_dims: Dimension der versteckten Schichten.
-    beta: Gewichtungsfaktor für KL-Divergenz im VAE-Verlust.
-    lr: Lernrate für den Optimierer.
-    early_stopping_patience: Geduld für das frühe Beenden des Trainings.
-    max_epochs: Maximale Anzahl von Epochen.
-    num_gpu_nodes: Anzahl der zu verwendenden GPU-Nodes.
-    run_as_pytorchjob: Gibt an, ob das Training als PyTorch-Job ausgeführt wird.
-    model_output_file: Dateiname, unter dem das trainierte Modell gespeichert wird.
+    train_df_path: Path to the trained DataFrame.
+    val_df_path: Path to the validated DataFrame.
+    seed: Seed for random number generators.
+    batch_size: Batch size for training.
+    latent_dim: Dimension of the latent space.
+    hidden_dims: Dimension of the hidden layers.
+    beta: Weighting factor for KL divergence in the VAE loss.
+    lr: Learning rate for the optimizer.
+    early_stopping_patience: Patience for early stopping of training.
+    max_epochs: Maximum number of epochs.
+    num_gpu_nodes: Number of GPU nodes to use.
+    num_dl_workers: Number of workers to use for the data loader.
+    run_as_pytorchjob: Indicates whether to run the training as a PyTorch job.
+    model_output_file: File name under which the trained model will be saved.
+    minio_model_bucket: Name of the MinIO bucket to store the model.
     """
     seed_everything(seed)
     np.random.seed(seed)
@@ -205,7 +218,12 @@ def run_training(
     # load dataset and initiate data module
     train_df = read_data_from_minio(train_df_path)
     val_df = read_data_from_minio(val_df_path)
-    dm = TimeStampDataModule(train_df=train_df, val_df=val_df, batch_size=batch_size)
+    dm = TimeStampDataModule(
+        train_df=train_df,
+        val_df=val_df,
+        batch_size=batch_size,
+        num_workers=num_dl_workers,
+    )
     dm.setup()
 
     # initiate model
@@ -244,7 +262,7 @@ def run_training(
             checkpoint_callback,
             early_stop_callback,
             StdOutLoggerCallback(),
-            ResetLogVarCallback(reset_epochs=5, reset_value=-2)
+            ResetLogVarCallback(reset_epochs=5, reset_value=-2),
         ],
         num_nodes=num_gpu_nodes,
         strategy="ddp" if run_as_pytorchjob else "auto",
@@ -258,7 +276,8 @@ def run_training(
         logger.debug(f"Trainer local_rank: {trainer.local_rank}")
 
     trainer.fit(model=model, datamodule=dm)
-
+    if minio_model_bucket:
+        upload_file_to_minio_bucket(minio_model_bucket, model_output_file)
 
 
 if __name__ == "__main__":
