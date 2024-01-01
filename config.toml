@@ -1,7 +1,13 @@
 [paths]
 telemetry_data_directory="eclss-data/telemetry/yearly-archives"
+telemetry_data_directory_splitted="eclss-data/telemetry/partitioned-telemetry"
 labels_xls_artifact_uri="minio://eclss-data/ARs - ECLSS - 2022.02.07 - reduced to 2020-2021 v4.xls"
 partitioned_telemetry_path="s3://eclss-data/telemetry/partitioned-telemetry/*/*"
+minio_model_bucket="eclss-model-bucket"
+
+[platform]
+minio_endpoint="http://minio.minio"
+namespace="henrik-steude"
 
 [col-names]
 timestamp_col="normalizedTime"

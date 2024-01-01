@@ -36,30 +36,53 @@ def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
 
 # define pipeline
 @dsl.pipeline
-def split_parquet_files_sub_pipeline():
+def split_parquet_files_sub_pipeline(rowgroups_per_file: int):
     raw_files_paths = create_s3_client().ls(config["paths"]["telemetry_data_directory"])
     for file in raw_files_paths:
         split_parquet_file_task = split_parquet_file(
             file_path=file,
-            target_path="eclss-data/telemetry/partitioned-telemetry",
-            timestamp_col="normalizedTime",
+            target_path=config["paths"]["telemetry_data_directory_splitted"],
+            timestamp_col=config["col-names"]["timestamp_col"],
             rowgroup_limit=100_000,
-            rowgroups_per_file=10,
+            rowgroups_per_file=rowgroups_per_file,
         )
         add_minio_env_vars_to_tasks([split_parquet_file_task])
 
 
 # define pipeline
 @dsl.pipeline
-def columbus_eclss_ad_pipeline():
-    split_parquet_files_task = split_parquet_files_sub_pipeline()
+def columbus_eclss_ad_pipeline(
+    rowgroups_per_file: int = 10,
+    dask_preproc_sample_frac: float = 0.001,
+    num_dask_workers: int = 4,
+    split_window_hours: int = 250,
+    train_split: float = 0.8,
+    viz_sample_fraction: float = 0.1,
+    katib_max_epochs: int = 100,
+    katib_max_trials: int = 5,
+    katib_batch_size_list: List = ["32", "64", "128", "256"],
+    katib_beta_list: List = ["0.001", "0.0001", "0.0001", "0.00001", "0.000001"],
+    katib_learning_rate_list: List = ["0.0005", "0.0001", "0.00005"],
+    latent_dim: int = 18,
+    pytorchjob_num_dl_workers=12,
+    pytorchjob_max_epochs=1000,
+    pytorchjob_early_stopping_patience=30,
+    pytorchjob_num_gpu_nodes=3,
+    eval_batch_size=1024,
+    eval_threshold_min=-200,
+    eval_threshold_max=-100,
+    eval_number_thresholds=100,
+):
+    split_parquet_files_task = split_parquet_files_sub_pipeline(
+        rowgroups_per_file=rowgroups_per_file
+    )
     dask_preprocessing_task = run_dask_preprocessing(
         partitioned_telemetry_paths=config["paths"]["partitioned_telemetry_path"],
-        sample_frac=0.001,
-        timestamp_col="normalizedTime",
-        minio_endpoint="http://minio.minio",
+        sample_frac=dask_preproc_sample_frac,
+        timestamp_col=config["col-names"]["timestamp_col"],
+        minio_endpoint=config["platform"]["minio_endpoint"],
         dask_worker_image=f'{config["images"]["eclss-ad-image"]}:commit-0a2239b9',
-        num_dask_workers=4,
+        num_dask_workers=num_dask_workers,
     )
     dask_preprocessing_task.after(split_parquet_files_task)
     add_minio_env_vars_to_tasks([dask_preprocessing_task])
@@ -81,8 +104,8 @@ def columbus_eclss_ad_pipeline():
         preproc_df_in=dask_preprocessing_task.outputs["preprocessed_df"],
         anomaly_df_in=get_label_series_task.outputs["labels_series"],
         label_col=config["col-names"]["ar_col"],
-        window_hours=250.0,
-        train_split=0.8,
+        window_hours=split_window_hours,
+        train_split=train_split,
     )
 
     fit_scaler_task = fit_scaler(
@@ -98,39 +121,39 @@ def columbus_eclss_ad_pipeline():
         label_column=config["col-names"]["ar_col"],
     )
 
-    visualize_split_task = visualize_split(
-        train_df_in=scale_data_task.outputs["train_df_scaled"],
-        test_df_in=scale_data_task.outputs["test_df_scaled"],
-        column_name="AFS2_Cab_Air_Massflow_MVD",
-        sample_fraction=0.01,
-    )
+    # visualize_split_task = visualize_split(
+    #     train_df_in=scale_data_task.outputs["train_df_scaled"],
+    #     test_df_in=scale_data_task.outputs["test_df_scaled"],
+    #     column_name="AFS2_Cab_Air_Massflow_MVD",
+    #     sample_fraction=viz_sample_fraction,
+    # )
 
     katib_task = run_katib_experiment(
         df_train=scale_data_task.outputs["train_df_scaled"],
         df_val=scale_data_task.outputs["val_df_scaled"],
         experiment_name="columbus-anomaly-detection-ml4cps",
         image=f'{config["images"]["eclss-ad-image"]}:commit-05a8cdb2',
-        namespace="henrik-steude",
-        max_epochs=100,
-        max_trials=5,
-        batch_size_list=["32", "64", "128", "256"],
-        beta_list=["0.001", "0.0001", "0.0001", "0.00001", "0.000001"],
-        learning_rate_list=["0.0005", "0.0001", "0.00005"],
-        latent_dim=18,
+        namespace=config["platform"]["namespace"],
+        max_epochs=katib_max_epochs,
+        max_trials=katib_max_trials,
+        batch_size_list=katib_beta_list,
+        beta_list=katib_beta_list,
+        learning_rate_list=katib_learning_rate_list,
+        latent_dim=latent_dim,
     )
 
     train_model_task = run_pytorch_training_job(
         train_df_in=scale_data_task.outputs["train_df_scaled"],
         val_df_in=scale_data_task.outputs["val_df_scaled"],
-        minio_model_bucket="eclss-model-bucket",
+        minio_model_bucket=config["paths"]["minio_model_bucket"],
         training_image=f'{config["images"]["eclss-ad-image"]}:commit-05a8cdb2',
-        namespace="henrik-steude",
-        num_dl_workers=12,
+        namespace=config["platform"]["namespace"],
         tuning_param_dct=katib_task.output,
-        max_epochs=1000,
-        early_stopping_patience=30,
-        latent_dim=10,
-        num_gpu_nodes=3,
+        num_dl_workers=pytorchjob_num_dl_workers,
+        max_epochs=pytorchjob_max_epochs,
+        early_stopping_patience=pytorchjob_early_stopping_patience,
+        latent_dim=latent_dim,
+        num_gpu_nodes=pytorchjob_num_gpu_nodes,
         seed=42,
     )
 
@@ -140,16 +163,16 @@ def columbus_eclss_ad_pipeline():
         test_df_in=scale_data_task.outputs["test_df_scaled"],
         label_col_name=config["col-names"]["ar_col"],
         device="cuda",
-        batch_size=1024,
-        threshold_min=-200,
-        threshold_max=-100,
-        number_thresholds=100,
+        batch_size=eval_batch_size,
+        threshold_min=eval_threshold_min,
+        threshold_max=eval_threshold_max,
+        number_thresholds=eval_number_thresholds,
     )
     add_minio_env_vars_to_tasks([evaluation_task])
 
     visualize_results_task = visualize_results(
         result_df_in=evaluation_task.outputs["result_df"],
         metrics_json=evaluation_task.outputs["metrics_dict"],
-        sample_fraction=0.1,
+        sample_fraction=viz_sample_fraction,
         label_col_name=config["col-names"]["ar_col"],
     )
