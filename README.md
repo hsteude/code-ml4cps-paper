@@ -166,8 +166,8 @@ poetry run ipython kernel install --name "ml4cps" --user
 Run Pytorch trianing locally in a notebook pod
 ```sh
 poetry run python main.py run_training \
-  --train-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/train_df_scaled" \
-  --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/val_df_scaled" \
+  --train-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/train_df_scaled" \
+  --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/val_df_scaled" \
   --seed 42 \
   --batch-size 32 \
   --latent-dim 10 \
@@ -179,5 +179,20 @@ poetry run python main.py run_training \
   --num-gpu-nodes 1 \
   --run-as-pytorchjob False \
   --model-output-file "local_test_model"
+```
 
+Run evaluation locally in a notebook pod
+```sh
+poetry run python container_component_src/main.py run_evaluation \
+  --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/val_df_scaled" \
+  --test-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/test_df_scaled" \
+  --batch-size 1024 \
+  --model-path "eclss-model-bucket/pytorch-job_20231228_110719" \
+  --device "cuda" \
+  --result-df-path 'local_data/results_df.parquet'\
+  --metrics-dict-path 'local_data/metrics.json' \
+  --threshold-min -1000 \
+  --threshold-max 0 \
+  --number-thresholds 1000 \
+  --label-col-name "Anomaly"
 ```

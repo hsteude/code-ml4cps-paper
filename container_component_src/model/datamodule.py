@@ -38,6 +38,7 @@ class TimeStampDataModule(pl.LightningDataModule):
         self,
         train_df: pd.DataFrame,
         val_df: pd.DataFrame,
+        label_col_name: Optional[str] = '',
         test_df: Optional[pd.DataFrame] = None,
         batch_size: int = 32,
         num_workers: Optional[int] = 0
@@ -48,12 +49,13 @@ class TimeStampDataModule(pl.LightningDataModule):
         self.test_df = test_df
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.label_col_name = label_col_name
 
     def setup(self, stage: str = None) -> None:
         self.train_dataset = TimeStampDataset(self.train_df)
         self.val_dataset = TimeStampDataset(self.val_df)
         if self.test_df is not None:
-            self.test_dataset = TimeStampDataset(self.test_df)
+            self.test_dataset = TimeStampDataset(self.test_df.drop(columns=[self.label_col_name]))
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(

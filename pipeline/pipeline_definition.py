@@ -11,7 +11,9 @@ from pipeline.components import (
     scale_dataframes,
     visualize_split,
     run_katib_experiment,
-    run_pytorch_training_job
+    run_pytorch_training_job,
+    run_evaluation,
+    visualize_results,
 )
 from container_component_src.utils import create_s3_client
 
@@ -100,36 +102,54 @@ def columbus_eclss_ad_pipeline():
         train_df_in=scale_data_task.outputs["train_df_scaled"],
         test_df_in=scale_data_task.outputs["test_df_scaled"],
         column_name="AFS2_Cab_Air_Massflow_MVD",
-        sample_fraction=0.1,
+        sample_fraction=0.01,
     )
 
     katib_task = run_katib_experiment(
         df_train=scale_data_task.outputs["train_df_scaled"],
         df_val=scale_data_task.outputs["val_df_scaled"],
         experiment_name="columbus-anomaly-detection-ml4cps",
-        image=f'{config["images"]["eclss-ad-image"]}:commit-ab98bc6a',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-05a8cdb2',
         namespace="henrik-steude",
-        max_epochs=150,
-        max_trials=50,
+        max_epochs=100,
+        max_trials=5,
         batch_size_list=["32", "64", "128", "256"],
-        beta_list=["0.0001", "0.5", "0.1", "1"],
-        learning_rate_list=["0.0005", "0.001", "0.005"],
-        latent_dim=10,
+        beta_list=["0.001", "0.0001", "0.0001", "0.00001", "0.000001"],
+        learning_rate_list=["0.0005", "0.0001", "0.00005"],
+        latent_dim=18,
     )
 
     train_model_task = run_pytorch_training_job(
         train_df_in=scale_data_task.outputs["train_df_scaled"],
         val_df_in=scale_data_task.outputs["val_df_scaled"],
         minio_model_bucket="eclss-model-bucket",
-        training_image=f'{config["images"]["eclss-ad-image"]}:commit-54a94e12',
+        training_image=f'{config["images"]["eclss-ad-image"]}:commit-05a8cdb2',
         namespace="henrik-steude",
         num_dl_workers=12,
         tuning_param_dct=katib_task.output,
-        max_epochs=10,
+        max_epochs=1000,
         early_stopping_patience=30,
         latent_dim=10,
         num_gpu_nodes=3,
-        seed=42
+        seed=42,
     )
 
+    evaluation_task = run_evaluation(
+        model_path=train_model_task.output,
+        val_df_in=scale_data_task.outputs["val_df_scaled"],
+        test_df_in=scale_data_task.outputs["test_df_scaled"],
+        label_col_name=config["col-names"]["ar_col"],
+        device="cuda",
+        batch_size=1024,
+        threshold_min=-200,
+        threshold_max=-100,
+        number_thresholds=100,
+    )
+    add_minio_env_vars_to_tasks([evaluation_task])
 
+    visualize_results_task = visualize_results(
+        result_df_in=evaluation_task.outputs["result_df"],
+        metrics_json=evaluation_task.outputs["metrics_dict"],
+        sample_fraction=0.1,
+        label_col_name=config["col-names"]["ar_col"],
+    )

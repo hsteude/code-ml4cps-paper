@@ -1,5 +1,5 @@
 from kfp import dsl
-from kfp.dsl import Input, Output, Dataset, Artifact, HTML
+from kfp.dsl import Input, Output, Dataset, Artifact, HTML, Metrics
 from typing import Dict, List, Optional
 import toml
 
@@ -387,7 +387,7 @@ def run_katib_experiment(
         "--seed=42",
         "--batch-size=${trialParameters.batchSize}",
         f"--latent-dim={latent_dim}",
-        "--hidden-dims=100",
+        "--hidden-dims=500",
         "--beta=${trialParameters.beta}",
         "--lr=${trialParameters.learningRate}",
         "--early-stopping-patience=30",
@@ -395,8 +395,8 @@ def run_katib_experiment(
         "--num-gpu-nodes=1",
         "--run-as-pytorchjob=False",
         "--model-output-file=local_test_model",
+        "--num-dl-workers=12",
     ]
-
 
     # Environment Dictionary
     env_dict = [
@@ -527,6 +527,7 @@ def run_katib_experiment(
     best_trial = result["status"]["currentOptimalTrial"]["parameterAssignments"]
     return {b["name"]: b["value"] for b in best_trial}
 
+
 @dsl.component(
     packages_to_install=["kubernetes", "loguru"],
     base_image="python:3.9",
@@ -577,9 +578,8 @@ def run_pytorch_training_job(
     from datetime import datetime
     from loguru import logger
 
-    batch_size, learning_rate,  beta = [
-        tuning_param_dct[k]
-        for k in ("batch_size", "learning_rate", "beta")
+    batch_size, learning_rate, beta = [
+        tuning_param_dct[k] for k in ("batch_size", "learning_rate", "beta")
     ]
 
     pytorchjob_name = "pytorch-job"
@@ -735,3 +735,138 @@ def run_pytorch_training_job(
 
     return f"{minio_model_bucket}/{model_output_file}"
 
+
+@dsl.container_component
+def run_evaluation(
+    model_path: str,
+    val_df_in: Input[Dataset],
+    test_df_in: Input[Dataset],
+    label_col_name: str,
+    device: str,
+    batch_size: int,
+    result_df: Output[Dataset],
+    metrics_dict: Output[Artifact],
+    threshold_min: int,
+    threshold_max: int,
+    number_thresholds: int,
+):
+    return dsl.ContainerSpec(
+        image=f'{config["images"]["eclss-ad-image"]}:commit-45024dfe',
+        command=["python", "container_component_src/main.py"],
+        args=[
+            "run_evaluation",
+            "--model-path",
+            model_path,
+            "--val-df-path",
+            val_df_in.path,
+            "--test-df-path",
+            test_df_in.path,
+            "--label-col-name",
+            label_col_name,
+            "--device",
+            device,
+            "--batch-size",
+            batch_size,
+            "--result-df-path",
+            result_df.path,
+            "--metrics-dict-path",
+            metrics_dict.path,
+            "--threshold-min",
+            threshold_min,
+            "--threshold-max",
+            threshold_max,
+            "--number-thresholds",
+            number_thresholds,
+        ],
+    )
+
+
+@dsl.component(
+    packages_to_install=["pyarrow", "pandas", "plotly==5.3.1"],
+    base_image="python:3.9",
+)
+def visualize_results(
+    result_df_in: Input[Dataset],
+    metrics_json: Input[Dataset],
+    result_viz: Output[HTML],
+    metrics: Output[Metrics],
+    sample_fraction: float = 0.1,
+    label_col_name: str = "Anomaly",
+) -> None:
+    """Creates output plot and logs metrics"""
+
+    import plotly.graph_objs as go
+    import pandas as pd
+    import json
+
+    with open(metrics_json.path, "r") as file:
+        metrics_dict = json.load(file)
+
+    for k, v in metrics_dict.items():
+        metrics.log_metric(metric=k, value=v)
+
+    def get_intervals(df, column, value):
+        intervals = []
+        start = None
+        for i, row in df.iterrows():
+            if row[column] == value and start is None:
+                start = i
+            elif row[column] != value and start is not None:
+                intervals.append((start, i))
+                start = None
+        if start is not None:
+            intervals.append((start, df.index[-1]))
+        return intervals
+
+    result_df = pd.read_parquet(result_df_in.path)
+
+    fig = go.Figure()
+    plot_df = result_df.sample(frac=sample_fraction).sort_index()
+
+    fig.add_trace(
+        go.Scatter(
+            x=plot_df.index,
+            y=-plot_df.neg_log_likelihood,
+            mode="markers",
+            name="Log Likelihood",
+            marker=dict(size=3),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=plot_df.index,
+            y=-plot_df.smoothed_neg_log_likelihood,
+            mode="lines",
+            name="Log Likelihood smoothed",
+            marker=dict(size=3),
+        )
+    )
+
+    for start, end in get_intervals(result_df, "dataset", "test"):
+        fig.add_vrect(
+            x0=start,
+            x1=end,
+            fillcolor="Orange",
+            opacity=0.2,
+            layer="below",
+            line_width=0,
+        )
+
+    for start, end in get_intervals(result_df, label_col_name, 1):
+        fig.add_vrect(
+            x0=start,
+            x1=end,
+            fillcolor="Red",
+            opacity=0.2,
+            layer="below",
+            line_width=0,
+        )
+
+    fig.update_layout(
+        title="Log Likelihood and Anomalies Over Time",
+        xaxis_title="Time",
+        yaxis_title="Values",
+        yaxis=dict(range=[-500, 0]),
+    )
+
+    fig.write_html(result_viz.path)

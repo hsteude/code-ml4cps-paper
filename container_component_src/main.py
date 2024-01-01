@@ -1,4 +1,5 @@
 import click
+import json
 import os
 from typing import Optional, List
 import pytorch_lightning as pl
@@ -24,6 +25,7 @@ from container_component_src.model.callbacks import (
     StdOutLoggerCallback,
     ResetLogVarCallback,
 )
+from container_component_src.eval.evaluator import ModelEvaluator
 
 # load config
 with open("config.toml", "r") as f:
@@ -172,6 +174,7 @@ def run_dask_preprocessing(
 @click.option("--run-as-pytorchjob", type=bool, required=True)
 @click.option("--model-output-file", type=str, required=True)
 @click.option("--minio-model-bucket", type=str, required=False)
+@click.option("--likelihood-mse-mixing-factor", type=float, required=False)
 def run_training(
     train_df_path: str,
     val_df_path: str,
@@ -187,6 +190,7 @@ def run_training(
     num_dl_workers: int,
     run_as_pytorchjob: bool,
     model_output_file: str,
+    likelihood_mse_mixing_factor: float,
     minio_model_bucket: Optional[str],
 ):
     """
@@ -233,6 +237,7 @@ def run_training(
         hidden_dims=hidden_dims,
         beta=beta,
         lr=lr,
+        likelihood_mse_mixing_factor=likelihood_mse_mixing_factor,
     )
 
     # early stopping callback
@@ -262,10 +267,11 @@ def run_training(
             checkpoint_callback,
             early_stop_callback,
             StdOutLoggerCallback(),
-            ResetLogVarCallback(reset_epochs=5, reset_value=-2),
+            # ResetLogVarCallback(reset_epochs=5, reset_value=-2),
         ],
         num_nodes=num_gpu_nodes,
         strategy="ddp" if run_as_pytorchjob else "auto",
+        enable_progress_bar=False,
     )
 
     # Log relevant trainer attributes
@@ -279,6 +285,51 @@ def run_training(
     trainer.save_checkpoint(model_output_file)
     if minio_model_bucket:
         upload_file_to_minio_bucket(minio_model_bucket, model_output_file)
+
+
+@cli.command("run_evaluation")
+@click.option("--model-path", type=str, required=True)
+@click.option("--val-df-path", type=str, required=True)
+@click.option("--test-df-path", type=str, required=True)
+@click.option("--label-col-name", type=str, required=True)
+@click.option("--device", type=str, required=True)
+@click.option("--batch-size", type=int, required=True)
+@click.option("--result-df-path", type=str, required=True)
+@click.option("--metrics-dict-path", type=str, required=True)
+@click.option("--threshold-min", type=int, required=True)
+@click.option("--threshold-max", type=int, required=True)
+@click.option("--number-thresholds", type=int, required=True)
+def run_evaluation(
+    val_df_path: str,
+    test_df_path: str,
+    model_path: str,
+    label_col_name: str,
+    device: str,
+    batch_size: int,
+    result_df_path: str,
+    metrics_dict_path: str,
+    threshold_min:int,
+    threshold_max:int,
+    number_thresholds:int,
+):
+    """Evaluation model performance"""
+
+    me = ModelEvaluator(
+        val_df_path=val_df_path,
+        test_df_path=test_df_path,
+        model_path=model_path,
+        label_col_name=label_col_name,
+        batch_size=batch_size,
+        device=device,
+        threshold_min=threshold_min,
+        threshold_max=threshold_max,
+        num_thresholds=number_thresholds,
+    )
+    result_df, metrics_dct = me.run()
+    result_df.to_parquet(result_df_path)
+    with open(metrics_dict_path, 'w') as file:
+        json.dump(metrics_dct, file)
+
 
 
 if __name__ == "__main__":
