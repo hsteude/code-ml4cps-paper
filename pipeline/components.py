@@ -18,7 +18,7 @@ def split_parquet_file(
 ):
     """Kubeflow pipeline component to split a large Parquet file into smaller files"""
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-c2f04ede',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-58f7cd50',
         command=["python", "container_component_src/main.py"],
         args=[
             "split_parquet_file",
@@ -48,7 +48,7 @@ def run_dask_preprocessing(
 ):
     """Kubeflow pipeline component for Dask preprocessing"""
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-0a2239b9',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-58f7cd50',
         command=["python", "container_component_src/main.py"],
         args=[
             "run_dask_preprocessing",
@@ -393,9 +393,10 @@ def run_katib_experiment(
         "--early-stopping-patience=30",
         f"--max-epochs={max_epochs}",
         "--num-gpu-nodes=1",
+        "--num-dl-workers=12",
         "--run-as-pytorchjob=False",
         "--model-output-file=local_test_model",
-        "--num-dl-workers=12",
+        "--likelihood-mse-mixing-factor=0.01",
     ]
 
     # Environment Dictionary
@@ -605,6 +606,7 @@ def run_pytorch_training_job(
         "--run-as-pytorchjob=True",
         f"--model-output-file={model_output_file}",
         f"--minio-model-bucket={minio_model_bucket}",
+        "--likelihood-mse-mixing-factor=0.1",
     ]
 
     template = {
@@ -751,7 +753,7 @@ def run_evaluation(
     number_thresholds: int,
 ):
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-45024dfe',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-58f7cd50',
         command=["python", "container_component_src/main.py"],
         args=[
             "run_evaluation",
