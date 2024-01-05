@@ -794,6 +794,8 @@ def visualize_results(
     metrics: Output[Metrics],
     sample_fraction: float = 0.1,
     label_col_name: str = "Anomaly",
+    scatter_y_min: int = -4000,
+    scatter_y_max: int = 500
 ) -> None:
     """Creates output plot and logs metrics"""
 
@@ -868,7 +870,7 @@ def visualize_results(
         title="Log Likelihood and Anomalies Over Time",
         xaxis_title="Time",
         yaxis_title="Values",
-        yaxis=dict(range=[-500, 0]),
+        yaxis=dict(range=[scatter_y_min, scatter_y_max]),
     )
 
     fig.write_html(result_viz.path)

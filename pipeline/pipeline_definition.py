@@ -175,4 +175,6 @@ def columbus_eclss_ad_pipeline(
         metrics_json=evaluation_task.outputs["metrics_dict"],
         sample_fraction=viz_sample_fraction,
         label_col_name=config["col-names"]["ar_col"],
+        scatter_y_min=-4000,
+        scatter_y_max=500
     )
