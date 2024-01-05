@@ -4,8 +4,8 @@ from torch import nn
 import pytorch_lightning as pl
 import torch
 from torch import nn
-from torch.distributions import MultivariateNormal
-from typing import Tuple
+from typing import Tuple, List
+import math
 
 
 class TimeStampVAE(pl.LightningModule):
@@ -54,7 +54,7 @@ class TimeStampVAE(pl.LightningModule):
         )
         self.log_var_x = nn.Parameter(torch.full((input_dim,), 0.0))
 
-    def encode(self, x: torch.Tensor) -> tuple:
+    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         z = self.encoder(x)
         mean, log_var = z.chunk(2, dim=-1)
         return mean, log_var
@@ -77,9 +77,13 @@ class TimeStampVAE(pl.LightningModule):
         z = mean_z
         mean_x = self.decode(z)
         scale = torch.exp(0.5 * self.log_var_x)
-        dist = MultivariateNormal(mean_x, scale_tril=torch.diag(scale))
+        dist = Normal(loc=mean_x, scale=scale)
         neg_log_likelihood = -dist.log_prob(x)
         return mean_z, log_var_z, mean_x, self.log_var_x, neg_log_likelihood
+
+    def forward(self, batch: torch.Tensor) -> torch.Tensor:
+        _, _, _, _, neg_log_likelihood = self.infer(batch)
+        return neg_log_likelihood
 
     def negative_log_likelihood(
         self,
@@ -87,7 +91,7 @@ class TimeStampVAE(pl.LightningModule):
         x: torch.Tensor,
     ) -> torch.Tensor:
         scale = torch.exp(0.5 * self.log_var_x) + 1e-30
-        dist = MultivariateNormal(mean_x, scale_tril=torch.diag(scale))
+        dist = Normal(loc=mean_x, scale=scale)
         return nn.MSELoss()(x, mean_x) - 1e-5 * dist.log_prob(x).mean()
 
     def loss_function(
@@ -129,3 +133,50 @@ class TimeStampVAE(pl.LightningModule):
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         return torch.optim.Adam(self.parameters(), lr=self.lr)
+
+
+class Normal:
+    @property
+    def mean(self):
+        return self.loc
+
+    @property
+    def stddev(self):
+        return self.scale
+
+    @property
+    def variance(self):
+        return self.stddev.pow(2)
+
+    def __init__(self, loc: torch.Tensor, scale: torch.Tensor):
+        resized_ = torch.broadcast_tensors(loc, scale)
+        self.loc = resized_[0]
+        self.scale = resized_[1]
+        self._batch_shape = list(self.loc.size())
+
+    def _extended_shape(self, sample_shape: List[int]) -> List[int]:
+        return sample_shape + self._batch_shape
+
+    def sample(self, sample_shape: List[int]) -> torch.Tensor:
+        shape = self._extended_shape(sample_shape)
+        return torch.normal(self.loc.expand(shape), self.scale.expand(shape))
+
+    def rsample(self, sample_shape: List[int]) -> torch.Tensor:
+        shape: List[int] = self._extended_shape(sample_shape)
+        eps = torch.normal(
+            torch.zeros(shape, device=self.loc.device),
+            torch.ones(shape, device=self.scale.device),
+        )
+        return self.loc + eps * self.scale
+
+    def log_prob(self, value: torch.Tensor) -> torch.Tensor:
+        var = self.scale**2
+        log_scale = self.scale.log()
+        return (
+            -((value - self.loc) ** 2) / (2 * var)
+            - log_scale
+            - math.log(math.sqrt(2 * math.pi))
+        )
+
+    def entropy(self) -> torch.Tensor:
+        return 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(self.scale)

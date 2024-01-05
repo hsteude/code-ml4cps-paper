@@ -908,6 +908,17 @@ files = [
 ]
 
 [[package]]
+name = "enum-compat"
+version = "0.0.3"
+description = "enum/enum34 compatibility package"
+optional = false
+python-versions = "*"
+files = [
+    {file = "enum-compat-0.0.3.tar.gz", hash = "sha256:3677daabed56a6f724451d585662253d8fb4e5569845aafa8bb0da36b1a8751e"},
+    {file = "enum_compat-0.0.3-py3-none-any.whl", hash = "sha256:88091b617c7fc3bbbceae50db5958023c48dc40b50520005aa3bf27f8f7ea157"},
+]
+
+[[package]]
 name = "exceptiongroup"
 version = "1.2.0"
 description = "Backport of PEP 654 (exception groups)"
@@ -4534,6 +4545,19 @@ dynamo = ["jinja2"]
 opt-einsum = ["opt-einsum (>=3.3)"]
 
 [[package]]
+name = "torch-model-archiver"
+version = "0.9.0"
+description = "Torch Model Archiver is used for creating archives of trained neural net models that can be consumed by TorchServe inference"
+optional = false
+python-versions = "*"
+files = [
+    {file = "torch_model_archiver-0.9.0-py3-none-any.whl", hash = "sha256:fab8e15c6e73f0bd398496504aa50528cb658938014ede85d7189d136f4cafc0"},
+]
+
+[package.dependencies]
+enum-compat = "*"
+
+[[package]]
 name = "torchmetrics"
 version = "1.2.1"
 description = "PyTorch native Metrics"
@@ -5038,4 +5062,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9,<3.12.0"
-content-hash = "c1191bb54726888d86cd4118a4f15a46b888c7d87af33f2d3a5e9e5b028f4b3d"
+content-hash = "83df2f92cf2ee2d6ba47d8c1ebc15a2976060e5075e7ce767305c5a2210dbcc4"
