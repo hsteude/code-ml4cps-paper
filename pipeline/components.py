@@ -18,7 +18,7 @@ def split_parquet_file(
 ):
     """Kubeflow pipeline component to split a large Parquet file into smaller files"""
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-58f7cd50',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
         command=["python", "container_component_src/main.py"],
         args=[
             "split_parquet_file",
@@ -48,7 +48,7 @@ def run_dask_preprocessing(
 ):
     """Kubeflow pipeline component for Dask preprocessing"""
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-58f7cd50',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
         command=["python", "container_component_src/main.py"],
         args=[
             "run_dask_preprocessing",
@@ -753,7 +753,7 @@ def run_evaluation(
     number_thresholds: int,
 ):
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-58f7cd50',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
         command=["python", "container_component_src/main.py"],
         args=[
             "run_evaluation",

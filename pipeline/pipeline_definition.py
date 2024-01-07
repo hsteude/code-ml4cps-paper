@@ -121,18 +121,11 @@ def columbus_eclss_ad_pipeline(
         label_column=config["col-names"]["ar_col"],
     )
 
-    # visualize_split_task = visualize_split(
-    #     train_df_in=scale_data_task.outputs["train_df_scaled"],
-    #     test_df_in=scale_data_task.outputs["test_df_scaled"],
-    #     column_name="AFS2_Cab_Air_Massflow_MVD",
-    #     sample_fraction=viz_sample_fraction,
-    # )
-
     katib_task = run_katib_experiment(
         df_train=scale_data_task.outputs["train_df_scaled"],
         df_val=scale_data_task.outputs["val_df_scaled"],
         experiment_name="columbus-anomaly-detection-ml4cps",
-        image=f'{config["images"]["eclss-ad-image"]}:commit-58f7cd50',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
         namespace=config["platform"]["namespace"],
         max_epochs=katib_max_epochs,
         max_trials=katib_max_trials,
@@ -146,7 +139,7 @@ def columbus_eclss_ad_pipeline(
         train_df_in=scale_data_task.outputs["train_df_scaled"],
         val_df_in=scale_data_task.outputs["val_df_scaled"],
         minio_model_bucket=config["paths"]["minio_model_bucket"],
-        training_image=f'{config["images"]["eclss-ad-image"]}:commit-58f7cd50',
+        training_image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
         namespace=config["platform"]["namespace"],
         tuning_param_dct=katib_task.output,
         num_dl_workers=pytorchjob_num_dl_workers,
