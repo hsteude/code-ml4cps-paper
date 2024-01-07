@@ -78,21 +78,22 @@ class TimeStampVAE(pl.LightningModule):
         mean_x = self.decode(z)
         scale = torch.exp(0.5 * self.log_var_x)
         dist = Normal(loc=mean_x, scale=scale)
-        neg_log_likelihood = -dist.log_prob(x)
+        neg_log_likelihood = -dist.log_prob(x).sum(dim=1)
         return mean_z, log_var_z, mean_x, self.log_var_x, neg_log_likelihood
 
     def forward(self, batch: torch.Tensor) -> torch.Tensor:
         _, _, _, _, neg_log_likelihood = self.infer(batch)
         return neg_log_likelihood
 
-    def negative_log_likelihood(
+    def custom_negative_log_likelihood(
         self,
         mean_x: torch.Tensor,
         x: torch.Tensor,
     ) -> torch.Tensor:
         scale = torch.exp(0.5 * self.log_var_x) + 1e-30
         dist = Normal(loc=mean_x, scale=scale)
-        return nn.MSELoss()(x, mean_x) - 1e-5 * dist.log_prob(x).mean()
+        log_probs = dist.log_prob(x).sum(dim=1)
+        return nn.MSELoss()(x, mean_x) - 1e-5 * log_probs.mean()
 
     def loss_function(
         self,
@@ -102,7 +103,7 @@ class TimeStampVAE(pl.LightningModule):
         mean_x: torch.Tensor,
     ):
         kl_div = -0.5 * torch.sum(1 + log_var_z - mean_z.pow(2) - log_var_z.exp())
-        neg_log_likelihood = self.negative_log_likelihood(mean_x, x)
+        neg_log_likelihood = self.custom_negative_log_likelihood(mean_x, x)
         mse_loss = nn.MSELoss()(x, mean_x)
         loss = (
             mse_loss
