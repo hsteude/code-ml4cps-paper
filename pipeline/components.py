@@ -254,7 +254,7 @@ def scale_dataframes(
 
     # Scale the training data while preserving the index
     train_df_sc = pd.DataFrame(
-        scaler.fit_transform(train_df), columns=train_df.columns, index=train_df.index
+        scaler.transform(train_df), columns=train_df.columns, index=train_df.index
     )
     train_df_sc.to_parquet(train_df_scaled.path)
 
