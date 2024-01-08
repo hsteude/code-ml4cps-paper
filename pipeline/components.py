@@ -18,7 +18,7 @@ def split_parquet_file(
 ):
     """Kubeflow pipeline component to split a large Parquet file into smaller files"""
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-c2f04ede',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
         command=["python", "container_component_src/main.py"],
         args=[
             "split_parquet_file",
@@ -48,7 +48,7 @@ def run_dask_preprocessing(
 ):
     """Kubeflow pipeline component for Dask preprocessing"""
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-0a2239b9',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
         command=["python", "container_component_src/main.py"],
         args=[
             "run_dask_preprocessing",
@@ -254,7 +254,7 @@ def scale_dataframes(
 
     # Scale the training data while preserving the index
     train_df_sc = pd.DataFrame(
-        scaler.fit_transform(train_df), columns=train_df.columns, index=train_df.index
+        scaler.transform(train_df), columns=train_df.columns, index=train_df.index
     )
     train_df_sc.to_parquet(train_df_scaled.path)
 
@@ -393,9 +393,10 @@ def run_katib_experiment(
         "--early-stopping-patience=30",
         f"--max-epochs={max_epochs}",
         "--num-gpu-nodes=1",
+        "--num-dl-workers=12",
         "--run-as-pytorchjob=False",
         "--model-output-file=local_test_model",
-        "--num-dl-workers=12",
+        "--likelihood-mse-mixing-factor=0.01",
     ]
 
     # Environment Dictionary
@@ -605,6 +606,7 @@ def run_pytorch_training_job(
         "--run-as-pytorchjob=True",
         f"--model-output-file={model_output_file}",
         f"--minio-model-bucket={minio_model_bucket}",
+        "--likelihood-mse-mixing-factor=0.1",
     ]
 
     template = {
@@ -751,7 +753,7 @@ def run_evaluation(
     number_thresholds: int,
 ):
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-45024dfe',
+        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
         command=["python", "container_component_src/main.py"],
         args=[
             "run_evaluation",
@@ -792,6 +794,8 @@ def visualize_results(
     metrics: Output[Metrics],
     sample_fraction: float = 0.1,
     label_col_name: str = "Anomaly",
+    scatter_y_min: int = -4000,
+    scatter_y_max: int = 500
 ) -> None:
     """Creates output plot and logs metrics"""
 
@@ -866,7 +870,7 @@ def visualize_results(
         title="Log Likelihood and Anomalies Over Time",
         xaxis_title="Time",
         yaxis_title="Values",
-        yaxis=dict(range=[-500, 0]),
+        yaxis=dict(range=[scatter_y_min, scatter_y_max]),
     )
 
     fig.write_html(result_viz.path)

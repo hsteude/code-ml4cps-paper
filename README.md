@@ -165,7 +165,7 @@ poetry run ipython kernel install --name "ml4cps" --user
 
 Run Pytorch trianing locally in a notebook pod
 ```sh
-poetry run python main.py run_training \
+poetry run python container_component_src/main.py run_training \
   --train-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/train_df_scaled" \
   --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/val_df_scaled" \
   --seed 42 \
@@ -178,7 +178,8 @@ poetry run python main.py run_training \
   --max-epochs 10 \
   --num-gpu-nodes 1 \
   --run-as-pytorchjob False \
-  --model-output-file "local_test_model"
+  --model-output-file "local_test_model" \
+  --num-dl-workers 12
 ```
 
 Run evaluation locally in a notebook pod
@@ -194,5 +195,6 @@ poetry run python container_component_src/main.py run_evaluation \
   --threshold-min -1000 \
   --threshold-max 0 \
   --number-thresholds 1000 \
-  --label-col-name "Anomaly"
+  --label-col-name "Anomaly" \
+  --likelihood-mse-mixing-factor 0.001
 ```

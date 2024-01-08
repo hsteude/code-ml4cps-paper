@@ -283,8 +283,11 @@ def run_training(
 
     trainer.fit(model=model, datamodule=dm)
     trainer.save_checkpoint(model_output_file)
+    script = model.to_torchscript()
+    torch.jit.save(script, f"{model_output_file}.pt")
     if minio_model_bucket:
         upload_file_to_minio_bucket(minio_model_bucket, model_output_file)
+        upload_file_to_minio_bucket(minio_model_bucket, f"{model_output_file}.pt")
 
 
 @cli.command("run_evaluation")
