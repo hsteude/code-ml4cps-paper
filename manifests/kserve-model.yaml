@@ -6,7 +6,7 @@ spec:
   predictor:
     containers:
       - name: pytorch-container
-        image: gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-a20d7830
+        image: gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-0a7155bf
         imagePullPolicy: Always
         command:
           - "python"
@@ -17,13 +17,13 @@ spec:
           - vae
         env:
           - name: STORAGE_URI
-            value: "s3://st-bucket/dev-data-01"
+            value: "s3://st-bucket/dev-data-02"
           - name: MODEL_FILENAME
-            value: "pytorch-job_20240107_170831"
+            value: "pytorch-job_20240110_095510.pt"
 
   transformer:
     containers:
-      - image: gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-a20d7830
+      - image: gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-0a7155bf
         imagePullPolicy: Always
         name: scaler-container
         command:
@@ -35,6 +35,6 @@ spec:
           - vae
         env:
           - name: STORAGE_URI
-            value: "s3://st-bucket/dev-data-01"
+            value: "s3://st-bucket/dev-data-02"
           - name: SCALER_FILENAME
             value: "fitted_scaler"

@@ -1,13 +1,12 @@
 import joblib
 from kserve import Model, constants
-from kserve.errors import InferenceError, ModelMissingError
+from kserve.errors import InferenceError
 from typing import Dict
 import logging
 import os
-from container_component_src.model.lightning_module import TimeStampVAE
 from sklearn.base import TransformerMixin
 from torch.nn.modules.module import Module
-from torch import Tensor
+from torch import Tensor, jit
 import pandas as pd
 
 logging.basicConfig(level=constants.KSERVE_LOGLEVEL)
@@ -50,21 +49,15 @@ class CustomPredictor(Model):
         self.load()
 
     def load(self):
-        self.model = TimeStampVAE.load_from_checkpoint(f'/mnt/models/{os.environ["MODEL_FILENAME"]}').to(self.device)
+        # torch script models
+        self.model = jit.load(f'/mnt/models/{os.environ["MODEL_FILENAME"]}')
         self.ready = True
         print(f"Loaded {self.model.__str__()}")
         return self.ready
 
     def predict(self, payload: Dict, headers: Dict[str, str] = None) -> Dict:
         data = pd.DataFrame(payload['instances'])
-
         try:
-            mean_z, log_var_z, mean_x, log_var_x, neg_log_likelihood = \
-                self.model.infer(Tensor(data.values))
-            return {"mean_z": mean_z.detach().numpy().tolist(),
-                    "log_var_z": log_var_z.detach().numpy().tolist(),
-                    "mean_x": mean_x.detach().numpy().tolist(),
-                    "log_var_x": log_var_x.detach().numpy().tolist(),
-                    "neg_log_likelihood": neg_log_likelihood.detach().numpy().tolist()}
+            return {"predictions": self.model(Tensor(data.values)).detach().numpy().tolist()}
         except Exception as e:
             raise InferenceError(str(e))
