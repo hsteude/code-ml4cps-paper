@@ -1,10 +1,10 @@
 from kfp import dsl
-from kfp.dsl import Input, Output, Dataset, Artifact, HTML, Metrics
+from kfp.dsl import Input, Output, Dataset, Artifact, HTML, Metrics, Model
 from typing import Dict, List, Optional
 import toml
 
 # load config
-with open("config.toml", "r") as f:
+with open("../config.toml", "r") as f:
     config = toml.load(f)
 
 
@@ -874,3 +874,97 @@ def visualize_results(
     )
 
     fig.write_html(result_viz.path)
+
+@dsl.component(
+    packages_to_install=[],
+    base_image="python:3.9",
+)
+def extract_composite_f1(
+    metrics_json: Input[Dataset],
+) -> float:
+    import json
+
+    with open(metrics_json.path, "r") as file:
+        metrics_dict = json.load(file)
+    return float(metrics_dict['composite_f1'])
+
+@dsl.component(
+    packages_to_install=["kubernetes", "loguru", "s3fs"],
+    base_image="python:3.9",
+)
+def serve_model(
+    model: Input[Model],
+    scaler: Input[Model],
+    prod_path: str,
+    serving_image: str,
+    model_name: str = "vae"
+):
+    from loguru import logger
+    import s3fs
+    import os
+    from pathlib import Path
+    from kubernetes import client, config, utils
+
+    fs = s3fs.S3FileSystem(
+        anon=False,
+        use_ssl=False,
+        client_kwargs={
+            "endpoint_url": f'http://{os.environ["S3_ENDPOINT"]}',
+            "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
+            "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+        },
+    )
+    logger.info(model.uri)
+    logger.info(scaler.uri)
+    prod_path = prod_path.replace("minio://", 's3://')
+    # Save model and scaler
+    saved_model_path = prod_path + str(Path(model.path).name)
+    fs.put(model.path, saved_model_path)
+    saved_scaler_path = prod_path + str(Path(scaler.path).name)
+    fs.put(scaler.path, saved_scaler_path)
+
+    # Start inference service
+    inference_service = \
+        {'apiVersion': 'serving.kserve.io/v1beta1',
+         'kind': 'InferenceService',
+         'metadata': {'name': model_name},
+         'spec': {'predictor': {'containers': [{'name': 'pytorch-container',
+                                                'image': serving_image,
+                                                'imagePullPolicy': 'Always',
+                                                'command': ['python',
+                                                            '/app/container_component_src/model_serving.py',
+                                                            'predictor'],
+                                                'args': ['--model_name', model_name],
+                                                'env': [{'name': 'STORAGE_URI', 'value': prod_path},
+                                                        {'name': 'MODEL_FILENAME',
+                                                         'value': str(Path(model.path).name)}]}]},
+                  'transformer': {'containers': [{
+                                                     'image': serving_image,
+                                                     'imagePullPolicy': 'Always',
+                                                     'name': 'scaler-container',
+                                                     'command': ['python',
+                                                                 '/app/container_component_src/model_serving.py',
+                                                                 'transformer'],
+                                                     'args': ['--model_name', model_name],
+                                                     'env': [
+                                                         {'name': 'STORAGE_URI', 'value': prod_path},
+                                                         {'name': 'SCALER_FILENAME', 'value': str(Path(scaler.path).name)}]}]}}}
+
+    config.load_incluster_config()
+    api_client = client.ApiClient()
+    custom_api = client.CustomObjectsApi(api_client)
+
+    # Pods have k8s related info mounted in /var/run/secrets/kubernetes.io
+    with open("/var/run/secrets/kubernetes.io/serviceaccount/namespace", mode='r') as file:
+        namespace = file.read()
+    # Common arguments for API calls
+    args_dict = {
+        "group": "serving.kserve.io",
+        "version": "v1beta1",
+        "namespace": namespace,
+        "plural": "InferenceServices",
+    }
+
+    custom_api.create_namespaced_custom_object(
+                body=inference_service, **args_dict
+            )

@@ -6,7 +6,7 @@ spec:
   predictor:
     containers:
       - name: pytorch-container
-        image: gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-0a7155bf
+        image: gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-76f45755
         imagePullPolicy: Always
         command:
           - "python"
@@ -23,7 +23,7 @@ spec:
 
   transformer:
     containers:
-      - image: gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-0a7155bf
+      - image: gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-76f45755
         imagePullPolicy: Always
         name: scaler-container
         command:
