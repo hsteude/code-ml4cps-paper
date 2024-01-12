@@ -30,7 +30,10 @@ class CustomTransformer(Model):
 
     def preprocess(self, inputs: Dict, headers: Dict[str, str] = None) -> Dict:
         data = pd.DataFrame(inputs['instances'])
-        return {'instances': pd.DataFrame(self.scaler.transform(data), columns=data.columns).to_dict()}
+        processed = pd.DataFrame(self.scaler.transform(data), columns=data.columns).T.to_dict()
+        # KServe validator expects a list for value of instances.
+        # Any dicts have to be json serializable, so column names have to be str
+        return {'instances': [processed[x] for x in processed]}
 
     def postprocess(self, inputs: Dict, headers: Dict[str, str] = None) -> Dict:
         return inputs
