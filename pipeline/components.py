@@ -896,7 +896,7 @@ def extract_composite_f1(
     base_image="python:3.9",
 )
 def serve_model(
-    model: Input[Model],
+    model_path: str,
     scaler: Input[Model],
     prod_path: str,
     serving_image: str,
@@ -905,7 +905,7 @@ def serve_model(
     """Deploys an InferenceService that serves the model trained by the pipeline
 
     Args:
-        model: model artefact
+        model_path: model artefact path
         scaler: scaler artefact
         prod_path: object storage path to where prod models should reside
         serving_image: container image to use for model serving
@@ -915,6 +915,7 @@ def serve_model(
     import s3fs
     import os
     from pathlib import Path
+    import tempfile
     from kubernetes import client, config
 
     fs = s3fs.S3FileSystem(
@@ -926,15 +927,20 @@ def serve_model(
             "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
         },
     )
-    logger.info(model.uri)
-    logger.info(scaler.uri)
     prod_path = prod_path.replace("minio://", 's3://')
+    model_path = model_path.replace("minio://", 's3://')
+    if not model_path.endswith(".pt"):
+        # Training operator returns path without .pt
+        model_path = model_path + ".pt"
     # Save model and scaler
-    saved_model_path = prod_path + str(Path(model.path).name)
-    fs.put(model.path, saved_model_path)
+    saved_model_path = prod_path + str(Path(model_path).name)
+    with tempfile.NamedTemporaryFile() as fp:
+        fs.get(model_path, fp.name)
+        fs.put(fp.name, saved_model_path)
     saved_scaler_path = prod_path + str(Path(scaler.path).name)
     fs.put(scaler.path, saved_scaler_path)
-
+    logger.info(f'Scaler saved to: {saved_scaler_path}')
+    logger.info(f'Model saved to: {saved_model_path}')
     # Start inference service
     inference_service = \
         {'apiVersion': 'serving.kserve.io/v1beta1',
@@ -949,7 +955,7 @@ def serve_model(
                                                 'args': ['--model_name', model_name],
                                                 'env': [{'name': 'STORAGE_URI', 'value': prod_path},
                                                         {'name': 'MODEL_FILENAME',
-                                                         'value': str(Path(model.path).name)}]}]},
+                                                         'value': model_path}]}]},
                   'transformer': {'containers': [{
                                                      'image': serving_image,
                                                      'imagePullPolicy': 'Always',
@@ -978,6 +984,20 @@ def serve_model(
         "plural": "inferenceservices",
     }
 
-    custom_api.create_namespaced_custom_object(
-                body=inference_service, **args_dict
+    try:
+        exists = custom_api.get_namespaced_custom_object(name=model_name, **args_dict)
+    except client.ApiException as e:
+        if e.status == 404:
+            exists = False
+        else:
+            raise ConnectionError()
+
+    if exists:
+        custom_api.patch_namespaced_custom_object(
+                name=model_name, body=inference_service, **args_dict
             )
+    else:
+        custom_api.create_namespaced_custom_object(
+            body=inference_service, **args_dict
+        )
+    logger.info(f'InferenceService {model_name} started in the namespace {namespace}')

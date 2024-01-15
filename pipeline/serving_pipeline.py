@@ -6,7 +6,7 @@ from typing import List
 import os
 import datetime
 
-SERVING_IMAGE = 'gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-76f45755'
+SERVING_IMAGE = 'gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-2f7cfe03'
 
 auth_session = get_istio_auth_session(
     url=os.environ['KUBEFLOW_ENDPOINT'],
@@ -43,19 +43,13 @@ def serving_pipeline(
     composite_f1 = extract_composite_f1(metrics_json=importer_metrics.output)
     # Using pipeline's flow control to decide wheter to deploy a model or not
     with dsl.If(composite_f1.output > threshold):
-        importer_model = dsl.importer(
-            artifact_uri='minio://eclss-model-bucket/pytorch-job_20240110_095510.pt',
-            artifact_class=dsl.Model,
-            reimport=False,
-        )
-
         importer_scaler = dsl.importer(
             artifact_uri='minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/627c04f8-f2e8-4086-ac17-d25a1c629f1e/fit-scaler/fitted_scaler',
             artifact_class=dsl.Model,
             reimport=False,
         )
         serve_task = serve_model(
-            model=importer_model.output,
+            model_path='minio://eclss-model-bucket/pytorch-job_20240110_095510.pt',
             scaler=importer_scaler.output,
             prod_path='minio://prod-models/eclss-vae/',
             serving_image=SERVING_IMAGE)
