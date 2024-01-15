@@ -1,6 +1,5 @@
 from kfp.client import Client
 from kfp import dsl, compiler
-from kfp.dsl import Input, Output, Dataset, Model, Metrics
 from pipeline.components import extract_composite_f1, serve_model
 from pipeline.auth_session import get_istio_auth_session
 from typing import List
@@ -34,6 +33,7 @@ def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
 def serving_pipeline(
         threshold: float
 ):
+    """A short pipeline that takes existing artefacts and serves them if composite f1 of the model is above threshold"""
     importer_metrics = dsl.importer(
         artifact_uri='minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/dd2114e2-f7f4-407e-8e26-182abfcf2a17/run-evaluation/metrics_dict',
         artifact_class=dsl.Dataset,
@@ -41,6 +41,7 @@ def serving_pipeline(
     )
 
     composite_f1 = extract_composite_f1(metrics_json=importer_metrics.output)
+    # Using pipeline's flow control to decide wheter to deploy a model or not
     with dsl.If(composite_f1.output > threshold):
         importer_model = dsl.importer(
             artifact_uri='minio://eclss-model-bucket/pytorch-job_20240110_095510.pt',
@@ -56,7 +57,7 @@ def serving_pipeline(
         serve_task = serve_model(
             model=importer_model.output,
             scaler=importer_scaler.output,
-            prod_path='minio://st-bucket/models-test/',
+            prod_path='minio://prod-models/eclss-vae/',
             serving_image=SERVING_IMAGE)
         add_minio_env_vars_to_tasks([serve_task])
 

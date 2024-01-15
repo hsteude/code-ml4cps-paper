@@ -875,6 +875,7 @@ def visualize_results(
 
     fig.write_html(result_viz.path)
 
+
 @dsl.component(
     packages_to_install=[],
     base_image="python:3.9",
@@ -882,11 +883,13 @@ def visualize_results(
 def extract_composite_f1(
     metrics_json: Input[Dataset],
 ) -> float:
+    """Extracts composite F1 score from metrics"""
     import json
 
     with open(metrics_json.path, "r") as file:
         metrics_dict = json.load(file)
     return float(metrics_dict['composite_f1'])
+
 
 @dsl.component(
     packages_to_install=["kubernetes", "loguru", "s3fs"],
@@ -899,11 +902,20 @@ def serve_model(
     serving_image: str,
     model_name: str = "vae"
 ):
+    """Deploys an InferenceService that serves the model trained by the pipeline
+
+    Args:
+        model: model artefact
+        scaler: scaler artefact
+        prod_path: object storage path to where prod models should reside
+        serving_image: container image to use for model serving
+        model_name: model name (used in model endpoint)
+    """
     from loguru import logger
     import s3fs
     import os
     from pathlib import Path
-    from kubernetes import client, config, utils
+    from kubernetes import client, config
 
     fs = s3fs.S3FileSystem(
         anon=False,
@@ -948,7 +960,8 @@ def serve_model(
                                                      'args': ['--model_name', model_name],
                                                      'env': [
                                                          {'name': 'STORAGE_URI', 'value': prod_path},
-                                                         {'name': 'SCALER_FILENAME', 'value': str(Path(scaler.path).name)}]}]}}}
+                                                         {'name': 'SCALER_FILENAME',
+                                                          'value': str(Path(scaler.path).name)}]}]}}}
 
     config.load_incluster_config()
     api_client = client.ApiClient()
@@ -962,7 +975,7 @@ def serve_model(
         "group": "serving.kserve.io",
         "version": "v1beta1",
         "namespace": namespace,
-        "plural": "InferenceServices",
+        "plural": "inferenceservices",
     }
 
     custom_api.create_namespaced_custom_object(
