@@ -127,7 +127,7 @@ def columbus_eclss_ad_pipeline(
     katib_task = run_katib_experiment(
         df_train=scale_data_task.outputs["train_df_scaled"],
         df_val=scale_data_task.outputs["val_df_scaled"],
-        experiment_name=f"columbus-anomaly-detection-ml4cps-{dsl.PIPELINE_JOB_NAME_PLACEHOLDER}",
+        experiment_name=f"columbus-anomaly-detection-ml4cps",
         image=config["images"]["eclss-ad-image"],
         namespace=config["platform"]["namespace"],
         max_epochs=katib_max_epochs,

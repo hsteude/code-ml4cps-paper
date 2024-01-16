@@ -373,7 +373,11 @@ def run_katib_experiment(
     import time
     from kubernetes import client, config
     from loguru import logger
+    import os
 
+    # Appending argo node id to experiment name so experiments always get unique names
+    experiment_name = experiment_name + "-" + os.environ['ARGO_NODE_ID'].split('-')[-1]
+    logger.info(f"Starting experiment: {experiment_name}")
     group = "kubeflow.org"
     version = "v1beta1"
     plural = "experiments"
