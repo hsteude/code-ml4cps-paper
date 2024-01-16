@@ -4,6 +4,7 @@ telemetry_data_directory_splitted="eclss-data/telemetry/partitioned-telemetry"
 labels_xls_artifact_uri="minio://eclss-data/ARs - ECLSS - 2022.02.07 - reduced to 2020-2021 v4.xls"
 partitioned_telemetry_path="s3://eclss-data/telemetry/partitioned-telemetry/*/*"
 minio_model_bucket="eclss-model-bucket"
+prod_path="prod-models/eclss-vae/"
 
 [platform]
 minio_endpoint="http://minio.minio"
@@ -19,4 +20,5 @@ ar_title_col="TITLE"
 ar_id_col="ID"
 
 [images]
-eclss-ad-image="gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad"
+eclss-ad-image="gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-2f7cfe03"
+serving-image="gitlab.kiss.space.unibw-hamburg.de:4567/kiss/code-ml4cps-paper/columbus-ad:commit-2f7cfe03"
