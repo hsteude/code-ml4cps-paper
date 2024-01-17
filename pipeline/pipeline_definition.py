@@ -14,11 +14,14 @@ from pipeline.components import (
     run_pytorch_training_job,
     run_evaluation,
     visualize_results,
+    extract_composite_f1,
+    extract_scaler_path,
+    serve_model
 )
 from container_component_src.utils import create_s3_client
 
 # load config
-with open("config.toml", "r") as f:
+with open(f"{os.path.dirname(os.path.abspath(__file__))}/../config.toml", "r") as f:
     config = toml.load(f)
 
 
@@ -72,6 +75,7 @@ def columbus_eclss_ad_pipeline(
     eval_threshold_min: int = -200,
     eval_threshold_max: int = -100,
     eval_number_thresholds: int = 100,
+    threshold: float = 0.7
 ):
     split_parquet_files_task = split_parquet_files_sub_pipeline(
         rowgroups_per_file=rowgroups_per_file
@@ -81,7 +85,7 @@ def columbus_eclss_ad_pipeline(
         sample_frac=dask_preproc_sample_frac,
         timestamp_col=config["col-names"]["timestamp_col"],
         minio_endpoint=config["platform"]["minio_endpoint"],
-        dask_worker_image=f'{config["images"]["eclss-ad-image"]}:commit-58f7cd50',
+        dask_worker_image=config["images"]["dask-worker"],
         num_dask_workers=num_dask_workers,
     )
     dask_preprocessing_task.after(split_parquet_files_task)
@@ -124,8 +128,8 @@ def columbus_eclss_ad_pipeline(
     katib_task = run_katib_experiment(
         df_train=scale_data_task.outputs["train_df_scaled"],
         df_val=scale_data_task.outputs["val_df_scaled"],
-        experiment_name="columbus-anomaly-detection-ml4cps",
-        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
+        experiment_name=f"columbus-anomaly-detection-ml4cps",
+        image=config["images"]["tuning"],
         namespace=config["platform"]["namespace"],
         max_epochs=katib_max_epochs,
         max_trials=katib_max_trials,
@@ -139,7 +143,7 @@ def columbus_eclss_ad_pipeline(
         train_df_in=scale_data_task.outputs["train_df_scaled"],
         val_df_in=scale_data_task.outputs["val_df_scaled"],
         minio_model_bucket=config["paths"]["minio_model_bucket"],
-        training_image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
+        training_image=config["images"]["training"],
         namespace=config["platform"]["namespace"],
         tuning_param_dct=katib_task.output,
         num_dl_workers=pytorchjob_num_dl_workers,
@@ -171,3 +175,13 @@ def columbus_eclss_ad_pipeline(
         scatter_y_min=-4000,
         scatter_y_max=500
     )
+
+    composite_f1 = extract_composite_f1(metrics_json=evaluation_task.outputs['metrics_dict'])
+    scaler_path = extract_scaler_path(scaler=fit_scaler_task.output)
+    with dsl.If(composite_f1.output > threshold):
+        serve_task = serve_model(
+            model_path=train_model_task.output,
+            scaler_path=scaler_path.output,
+            prod_path=f'minio://{config["paths"]["prod_path"]}',
+            serving_image=config["images"]["serving"])
+        add_minio_env_vars_to_tasks([serve_task])

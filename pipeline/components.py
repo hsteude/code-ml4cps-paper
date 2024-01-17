@@ -1,10 +1,11 @@
+import os
 from kfp import dsl
-from kfp.dsl import Input, Output, Dataset, Artifact, HTML, Metrics
+from kfp.dsl import Input, Output, Dataset, Artifact, HTML, Metrics, Model
 from typing import Dict, List, Optional
 import toml
 
 # load config
-with open("config.toml", "r") as f:
+with open(f"{os.path.dirname(os.path.abspath(__file__))}/../config.toml", "r") as f:
     config = toml.load(f)
 
 
@@ -18,7 +19,7 @@ def split_parquet_file(
 ):
     """Kubeflow pipeline component to split a large Parquet file into smaller files"""
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
+        image=f'{config["images"]["split-parquet-file"]}',
         command=["python", "container_component_src/main.py"],
         args=[
             "split_parquet_file",
@@ -48,7 +49,7 @@ def run_dask_preprocessing(
 ):
     """Kubeflow pipeline component for Dask preprocessing"""
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
+        image=f'{config["images"]["dask-component"]}',
         command=["python", "container_component_src/main.py"],
         args=[
             "run_dask_preprocessing",
@@ -373,7 +374,11 @@ def run_katib_experiment(
     import time
     from kubernetes import client, config
     from loguru import logger
+    import os
 
+    # Appending argo node id to experiment name so experiments always get unique names
+    experiment_name = experiment_name + "-" + os.environ['ARGO_NODE_ID'].split('-')[-1]
+    logger.info(f"Starting experiment: {experiment_name}")
     group = "kubeflow.org"
     version = "v1beta1"
     plural = "experiments"
@@ -477,7 +482,7 @@ def run_katib_experiment(
                 "objectiveMetricName": "val_loss",
                 "additionalMetricNames": ["train_loss"],
             },
-            "algorithm": {"algorithmName": "bayesianoptimization"},
+            "algorithm": {"algorithmName": "random"},
             "parameters": [
                 {
                     "name": "learning_rate",
@@ -753,7 +758,7 @@ def run_evaluation(
     number_thresholds: int,
 ):
     return dsl.ContainerSpec(
-        image=f'{config["images"]["eclss-ad-image"]}:commit-8656daef',
+        image=f'{config["images"]["evaluation"]}',
         command=["python", "container_component_src/main.py"],
         args=[
             "run_evaluation",
@@ -874,3 +879,146 @@ def visualize_results(
     )
 
     fig.write_html(result_viz.path)
+
+
+@dsl.component(
+    packages_to_install=[],
+    base_image="python:3.9",
+)
+def extract_composite_f1(
+    metrics_json: Input[Dataset],
+) -> float:
+    """Extracts composite F1 score from metrics"""
+    import json
+
+    with open(metrics_json.path, "r") as file:
+        metrics_dict = json.load(file)
+    return float(metrics_dict['composite_f1'])
+
+
+@dsl.component(
+    packages_to_install=[],
+    base_image="python:3.9",
+)
+def extract_scaler_path(
+    scaler: Input[Model]
+) -> str:
+    """Extracts scaler path because passing artifacts to nested pipeline is not yet implemented"""
+
+    return scaler.uri
+
+@dsl.component(
+    packages_to_install=["kubernetes", "loguru", "s3fs"],
+    base_image="python:3.9",
+)
+def serve_model(
+    model_path: str,
+    scaler_path: str,
+    prod_path: str,
+    serving_image: str,
+    model_name: str = "vae"
+):
+    """Deploys an InferenceService that serves the model trained by the pipeline
+
+    Args:
+        model_path: model artefact path
+        scaler_path: scaler artefact
+        prod_path: object storage path to where prod models should reside
+        serving_image: container image to use for model serving
+        model_name: model name (used in model endpoint)
+    """
+    from loguru import logger
+    import s3fs
+    import os
+    from pathlib import Path
+    import tempfile
+    from kubernetes import client, config
+
+    fs = s3fs.S3FileSystem(
+        anon=False,
+        use_ssl=False,
+        client_kwargs={
+            "endpoint_url": f'http://{os.environ["S3_ENDPOINT"]}',
+            "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
+            "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+        },
+    )
+    prod_path = prod_path.replace("minio://", 's3://')
+    model_path = model_path.replace("minio://", "")
+    scaler_path = scaler_path.replace("minio://", "")
+    logger.info(model_path)
+    logger.info(scaler_path)
+    if not model_path.endswith(".pt"):
+        # Training operator returns path without .pt
+        model_path = model_path + ".pt"
+    # Save model and scaler
+    saved_model_path = prod_path + str(Path(model_path).name)
+    with tempfile.NamedTemporaryFile() as fp:
+        fs.get(model_path, fp.name)
+        fs.put(fp.name, saved_model_path)
+    saved_scaler_path = prod_path + str(Path(scaler_path).name)
+    with tempfile.NamedTemporaryFile() as fp:
+        fs.get(scaler_path, fp.name)
+        fs.put(fp.name, saved_scaler_path)
+    logger.info(f'Scaler saved to: {saved_scaler_path}')
+    logger.info(f'Model saved to: {saved_model_path}')
+    # Start inference service
+    inference_service = \
+        {'apiVersion': 'serving.kserve.io/v1beta1',
+         'kind': 'InferenceService',
+         'metadata': {'name': model_name},
+         'spec': {'predictor': {'containers': [{'name': 'pytorch-container',
+                                                'image': serving_image,
+                                                'imagePullPolicy': 'Always',
+                                                'command': ['python',
+                                                            '/app/container_component_src/model_serving.py',
+                                                            'predictor'],
+                                                'args': ['--model_name', model_name],
+                                                'env': [{'name': 'STORAGE_URI', 'value': prod_path},
+                                                        {'name': 'MODEL_FILENAME',
+                                                         'value': str(Path(model_path).name)}]}]},
+                  'transformer': {'containers': [{
+                                                     'image': serving_image,
+                                                     'imagePullPolicy': 'Always',
+                                                     'name': 'scaler-container',
+                                                     'command': ['python',
+                                                                 '/app/container_component_src/model_serving.py',
+                                                                 'transformer'],
+                                                     'args': ['--model_name', model_name],
+                                                     'env': [
+                                                         {'name': 'STORAGE_URI', 'value': prod_path},
+                                                         {'name': 'SCALER_FILENAME',
+                                                          'value': str(Path(scaler_path).name)}]}]}}}
+
+    config.load_incluster_config()
+    api_client = client.ApiClient()
+    custom_api = client.CustomObjectsApi(api_client)
+
+    # Pods have k8s related info mounted in /var/run/secrets/kubernetes.io
+    with open("/var/run/secrets/kubernetes.io/serviceaccount/namespace", mode='r') as file:
+        namespace = file.read()
+    # Common arguments for API calls
+    args_dict = {
+        "group": "serving.kserve.io",
+        "version": "v1beta1",
+        "namespace": namespace,
+        "plural": "inferenceservices",
+    }
+
+    try:
+        exists = custom_api.get_namespaced_custom_object(name=model_name, **args_dict)
+    except client.ApiException as e:
+        if e.status == 404:
+            exists = False
+        else:
+            raise ConnectionError()
+
+    if exists:
+        custom_api.patch_namespaced_custom_object(
+                name=model_name, body=inference_service, **args_dict
+            )
+    else:
+        custom_api.create_namespaced_custom_object(
+            body=inference_service, **args_dict
+        )
+    logger.info(f'InferenceService {model_name} started in the namespace {namespace}')

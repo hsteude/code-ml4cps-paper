@@ -1,0 +1,1 @@
+from .kserve import CustomPredictor, CustomTransformer

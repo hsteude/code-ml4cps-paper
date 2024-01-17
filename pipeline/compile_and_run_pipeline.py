@@ -1,7 +1,13 @@
 import os
-from dotenv import load_dotenv
 import click
 from kfp.client import Client
+from loguru import logger
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ModuleNotFoundError:
+    logger.info("dotenv package not found. Only existing environment variables will be used")
 
 
 @click.command()
@@ -11,11 +17,26 @@ from kfp.client import Client
     help="Set this flag to run the pipeline remotely.",
 )
 def run(remote):
-    load_dotenv()
+    """Compile and run the Kubeflow pipeline.
+
+This script needs a bunch of env variables (or .env file with dotenv package installed):
+
+\nKUBEFLOW_ENDPOINT
+\nKUBEFLOW_USERNAME
+\nKUBEFLOW_PASSWORD
+\nKUBEFLOW_NAMESPACE (optional inferred from KUBEFLOW_USERNAME if not provided)
+\nS3_ENDPOINT
+\nAWS_ACCESS_KEY_ID
+\nAWS_SECRET_ACCESS_KEY
+
+    """
     from pipeline.pipeline_definition import columbus_eclss_ad_pipeline
     from pipeline.auth_session import get_istio_auth_session
 
-    """ Compile and run the Kubeflow pipeline. """
+    # Infer namespace from username if no namespace provided
+    namespace = os.environ.get('KUBEFLOW_NAMESPACE', None) or \
+        os.environ['KUBEFLOW_USERNAME'].split("@")[0].replace(".", "-")
+
     if remote:
         auth_session = get_istio_auth_session(
             url=os.environ["KUBEFLOW_ENDPOINT"],
@@ -25,7 +46,7 @@ def run(remote):
 
         client = Client(
             host=f"{os.environ['KUBEFLOW_ENDPOINT']}/pipeline",
-            namespace=os.environ["KUBEFLOW_NAMESPACE"],
+            namespace=namespace,
             cookies=auth_session["session_cookie"],
             verify_ssl=False,
         )
@@ -54,6 +75,7 @@ def run(remote):
         eval_threshold_min=-200,
         eval_threshold_max=-100,
         eval_number_thresholds=100,
+        threshold=0.7
     )
 
     # Compile and run the pipeline

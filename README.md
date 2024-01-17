@@ -133,6 +133,29 @@ poetry run python pipeline/compile_and_run_pipeline.py --remote
 The pipeline can be executed directly from the Kubeflow UI.
 This method is convenient but requires either that the pipeline has been previously run in the same namespace, or that you have access to the compiled pipeline YAML file.
 
+## Accessing the deployed model
+
+Final result of the pipeline is a KServe [InferenceService](https://kserve.github.io/website/0.11/get_started/first_isvc/)
+that provides a REST API where the model can be queried. The full URL of the model API can be found in the UI or by running:
+```shell
+kubectl get inferenceservice -n samo-turk vae -o=jsonpath='{.status.address.url}'
+```
+*Note that this is internal URL reachable from the cluster. Configuring model access from the outside is beyond the 
+scope.*  
+
+Model can be queried within the cluster with:
+```shell
+# KServe<=0.10
+curl -H "Content-Type: application/json" -k "<internal-url>"  -d @request.json
+# KServe>=0.11
+curl  -H "Content-Type: application/json" -k <internal-url>/v1/models/<model-name>:predict -d @request.json
+```
+where `request.json` has the following structure:
+```json
+{"instances": [{"Column 1":  0, ...}]}
+```
+
+
 ## How to Contribute
 
 1. **Type Hinting**: Always use type hinting in Python code.
