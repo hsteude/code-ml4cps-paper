@@ -897,12 +897,23 @@ def extract_composite_f1(
 
 
 @dsl.component(
+    packages_to_install=[],
+    base_image="python:3.9",
+)
+def extract_scaler_path(
+    scaler: Input[Model]
+) -> str:
+    """Extracts scaler path because passing artifacts to nested pipeline is not yet implemented"""
+
+    return scaler.uri
+
+@dsl.component(
     packages_to_install=["kubernetes", "loguru", "s3fs"],
     base_image="python:3.9",
 )
 def serve_model(
     model_path: str,
-    scaler: Input[Model],
+    scaler_path: str,
     prod_path: str,
     serving_image: str,
     model_name: str = "vae"
@@ -911,7 +922,7 @@ def serve_model(
 
     Args:
         model_path: model artefact path
-        scaler: scaler artefact
+        scaler_path: scaler artefact
         prod_path: object storage path to where prod models should reside
         serving_image: container image to use for model serving
         model_name: model name (used in model endpoint)
@@ -933,7 +944,10 @@ def serve_model(
         },
     )
     prod_path = prod_path.replace("minio://", 's3://')
-    model_path = model_path.replace("minio://", 's3://')
+    model_path = model_path.replace("minio://", "")
+    scaler_path = scaler_path.replace("minio://", "")
+    logger.info(model_path)
+    logger.info(scaler_path)
     if not model_path.endswith(".pt"):
         # Training operator returns path without .pt
         model_path = model_path + ".pt"
@@ -942,8 +956,10 @@ def serve_model(
     with tempfile.NamedTemporaryFile() as fp:
         fs.get(model_path, fp.name)
         fs.put(fp.name, saved_model_path)
-    saved_scaler_path = prod_path + str(Path(scaler.path).name)
-    fs.put(scaler.path, saved_scaler_path)
+    saved_scaler_path = prod_path + str(Path(scaler_path).name)
+    with tempfile.NamedTemporaryFile() as fp:
+        fs.get(scaler_path, fp.name)
+        fs.put(fp.name, saved_scaler_path)
     logger.info(f'Scaler saved to: {saved_scaler_path}')
     logger.info(f'Model saved to: {saved_model_path}')
     # Start inference service
@@ -972,7 +988,7 @@ def serve_model(
                                                      'env': [
                                                          {'name': 'STORAGE_URI', 'value': prod_path},
                                                          {'name': 'SCALER_FILENAME',
-                                                          'value': str(Path(scaler.path).name)}]}]}}}
+                                                          'value': str(Path(scaler_path).name)}]}]}}}
 
     config.load_incluster_config()
     api_client = client.ApiClient()

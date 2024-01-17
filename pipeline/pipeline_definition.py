@@ -15,6 +15,7 @@ from pipeline.components import (
     run_evaluation,
     visualize_results,
     extract_composite_f1,
+    extract_scaler_path,
     serve_model
 )
 from container_component_src.utils import create_s3_client
@@ -176,10 +177,11 @@ def columbus_eclss_ad_pipeline(
     )
 
     composite_f1 = extract_composite_f1(metrics_json=evaluation_task.outputs['metrics_dict'])
+    scaler_path = extract_scaler_path(scaler=fit_scaler_task.output)
     with dsl.If(composite_f1.output > threshold):
         serve_task = serve_model(
             model_path=train_model_task.output,
-            scaler=fit_scaler_task.output,
+            scaler_path=scaler_path.output,
             prod_path=f'minio://{config["paths"]["prod_path"]}',
             serving_image=config["images"]["serving"])
         add_minio_env_vars_to_tasks([serve_task])
