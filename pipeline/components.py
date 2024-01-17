@@ -481,7 +481,7 @@ def run_katib_experiment(
                 "objectiveMetricName": "val_loss",
                 "additionalMetricNames": ["train_loss"],
             },
-            "algorithm": {"algorithmName": "bayesianoptimization"},
+            "algorithm": {"algorithmName": "random"},
             "parameters": [
                 {
                     "name": "learning_rate",
