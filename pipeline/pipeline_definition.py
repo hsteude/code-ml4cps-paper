@@ -20,7 +20,7 @@ from pipeline.components import (
 from container_component_src.utils import create_s3_client
 
 # load config
-with open("../config.toml", "r") as f:
+with open(f"{os.path.dirname(os.path.abspath(__file__))}/../config.toml", "r") as f:
     config = toml.load(f)
 
 
@@ -84,7 +84,7 @@ def columbus_eclss_ad_pipeline(
         sample_frac=dask_preproc_sample_frac,
         timestamp_col=config["col-names"]["timestamp_col"],
         minio_endpoint=config["platform"]["minio_endpoint"],
-        dask_worker_image=config["images"]["eclss-ad-image"],
+        dask_worker_image=config["images"]["dask-worker"],
         num_dask_workers=num_dask_workers,
     )
     dask_preprocessing_task.after(split_parquet_files_task)
@@ -128,7 +128,7 @@ def columbus_eclss_ad_pipeline(
         df_train=scale_data_task.outputs["train_df_scaled"],
         df_val=scale_data_task.outputs["val_df_scaled"],
         experiment_name=f"columbus-anomaly-detection-ml4cps",
-        image=config["images"]["eclss-ad-image"],
+        image=config["images"]["tuning"],
         namespace=config["platform"]["namespace"],
         max_epochs=katib_max_epochs,
         max_trials=katib_max_trials,
@@ -142,7 +142,7 @@ def columbus_eclss_ad_pipeline(
         train_df_in=scale_data_task.outputs["train_df_scaled"],
         val_df_in=scale_data_task.outputs["val_df_scaled"],
         minio_model_bucket=config["paths"]["minio_model_bucket"],
-        training_image=config["images"]["eclss-ad-image"],
+        training_image=config["images"]["training"],
         namespace=config["platform"]["namespace"],
         tuning_param_dct=katib_task.output,
         num_dl_workers=pytorchjob_num_dl_workers,
@@ -181,5 +181,5 @@ def columbus_eclss_ad_pipeline(
             model_path=train_model_task.output,
             scaler=fit_scaler_task.output,
             prod_path=f'minio://{config["paths"]["prod_path"]}',
-            serving_image=config["images"]["serving-image"])
+            serving_image=config["images"]["serving"])
         add_minio_env_vars_to_tasks([serve_task])
