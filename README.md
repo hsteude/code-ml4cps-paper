@@ -1,13 +1,109 @@
 # Code for ML4CPS Paper on Kubeflow
 
-This repository contains the code for our paper titled "Integrating Multiple Kubeflow Features for Anomaly Detection on ISS Telemetry Data".
-The Abstract will be something like this:
+This repository hosts the code for our paper titled "End-to-End MLOps
+Integration: A Case Study with ISS Telemetry Data". The abstract of our paper is
+as follows (a full reference will be provided upon publication):
 
-Kubeflow integrates a suite of powerful tools for ML software development and deployment.
-While often showcased independently in demos, this paper focuses on their collective effectiveness within a unified end-to-end workflow.
-We conduct a case study on anomaly detection using telemetry data from the International Space Station (ISS) to discuss the effectiveness of integrating various tools—Dask, Katib, PyTorch Operator, and KServe—in a single Kubeflow Pipelines (KFP) framework.
+"Kubeflow integrates a suite of powerful tools for ML software development and
+deployment. While these tools are often demonstrated individually, our paper
+explores their collective effectiveness within a unified end-to-end workflow. We
+present a case study on anomaly detection using telemetry data from the
+International Space Station (ISS), highlighting the integration of various
+tools—Dask, Katib, PyTorch Operator, and KServe—within a single Kubeflow
+Pipelines (KFP) workflow."
 
-## Project Structure
+This README is divided into two main sections. The first part serves as an
+appendix to our paper, offering a more detailed description of the implemented
+pipeline. This includes screenshots from the Kubeflow UI, accompanied by brief
+explanatory notes. The second part provides a traditional README, explaining the
+repository setup, installation instructions, and guidelines for running the
+experiments.
+
+## Appendix: Detailed Pipeline Description and Screenshots
+
+### Pipeline DAG
+The image below shows a screenshot of the Directed Acyclic Graph (DAG) of our
+KFP pipeline. The boxes with yellow directory icons represent pipeline artifacts
+stored in MinIO. The boxes containing blue icons and green checkmarks represent
+the pipeline steps. In the Kubeflow documentation, these steps are referred to
+as 'Tasks.' Each Task represents the execution of a Kubeflow Pipelines
+component, consisting of a container image, a command, and input/output
+specifications. If parallelization is possible according to the DAG, tasks are
+executed concurrently. If a task has previously been executed with the same
+configuration, the results are cached, meaning they are loaded from the
+precomputed artifacts in MinIO.
+
+
+![kfp-dag](./assets/pipeline-all.png)
+
+
+The following screenshot shows the sub-pipeline visualized at the top of
+the main DAG (`split-parquet-files`). In this DAG, tasks that split yearly archives into smaller files
+run in parallel.
+
+![kfp-subpipeline-dat](./assets/subpipeline-split-parquet.png)
+
+Model deployment with KServe occurs only if the trained model achieves a
+composite F score higher than a user-defined threshold. This pipeline is also
+represented as a sub-pipeline in the main DAG (lower left of the main DAG:
+`condition-1`):
+
+![kfp-subpipeline-dat](./assets/subpipeline-if-clause.png)
+
+### KFP Visualizations
+In KFP, tasks can have special output types that allow visualizations to be
+displayed within the Kubeflow UI. We utilized this feature in our case study to
+visualize the model evaluation. For instance, we plotted the likelihood of our
+VAE for anomaly detection over time, as described in the paper. The same plot
+can be rendered as HTML and displayed as an output of the KFP task in the UI.
+Here is a screenshot illustrating this:
+
+![kfp-viz-metric](./assets/kfp-viz-html.png)
+
+Moreover, KFP offers the capability to display metrics in a similar manner,
+which we also utilized in our case study:
+
+![kfp-viz-html](./assets/kfp-viz-metrics.png)
+
+### Cloning and Comparing Pipeline Runs
+Pipeline tasks can be executed with various inputs. This also applies to entire
+pipelines, allowing them to be rerun with different configurations, such as for
+parameter tuning or retraining in response to data drift. These reruns can be
+automatically triggered, but KFP also provides a UI feature to reconfigure and
+restart the pipeline:
+
+![kfp-clone](./assets/kfp-start-clone-new-params.png)
+
+Finally, the UI allows comparing different runs of a pipeline in terms of their
+outputs:
+
+![kfp-compare](./assets/kfp-compaare.png)
+
+### Katib Experiment Visualization
+
+Katib automatically generates a hyperparameter tuning plot, which is displayed
+in the UI.
+
+![katib-plot](./assets/katib-plot.png)
+
+Additionally, each trial in Katib (a trial being a run of training with a set of
+hyperparameters) has its own view. In this view, the course of logged metrics
+over time is plotted by default (in our case, training and validation loss).
+There is also a tab showing the actual standard out logs of the trial pod in the
+UI.
+
+![kfp-katib-trial](./assets/katib-plot-trial.png)
+
+### Kserve
+In the KServe UI, logs from individual model pods are displayed among other
+features. In our case, this includes the logs of the Predictor that serves the
+PyTorch Model, and the Transformer, responsible for scaling the data.
+
+![kserve](./assets/kserve-logs.png)
+
+
+## Technical Readme
+### Project Structure
 
 All necessary components for defining, compiling, and executing the pipeline are contained within a single Python package named `pipeline`.
 The `container_component_src` directory contains Python code for custom container images used for various tasks, including Dask workers, PyTorch training jobs, Katib hyperparameter tuning, and more.
@@ -53,7 +149,7 @@ The repository structure is outlined below:
 └── README.md
 ```
 
-## Installation
+### Installation
 
 To install the Python project locally, execute the following command:
 
@@ -63,7 +159,7 @@ poetry install
 
 This command will set up the project with all necessary dependencies as defined in the pyproject.toml file.
 
-## Building the Image
+### Building the Image
 
 The Docker image for this project is set up to build automatically via GitLab's CI/CD pipeline upon pushing your code.
 The CI pipeline builds the Docker image with two tags: latest and a short hash of the corresponding commit.
@@ -86,7 +182,7 @@ docker push <example-image-name>
 
 There are multiple ways to execute the Kubeflow pipeline:
 
-### From a Kubeflow Notebook (KF-Notebook)
+#### From a Kubeflow Notebook (KF-Notebook)
 
 Within a Kubeflow notebook environment in the cluster, all necessary environment variables and permissions should already be set. After building and pushing the image to the specified registry (as noted in config.toml), you can run the pipeline with:
 
@@ -94,7 +190,7 @@ Within a Kubeflow notebook environment in the cluster, all necessary environment
 poetry run python pipeline/compile_and_run_pipeline.py
 ```
 
-### Running Remotely
+#### Running Remotely
 
 You can also execute the pipeline from your local development machine.
 To do so, ensure to forward the MinIO port to your local machine.
@@ -128,12 +224,12 @@ Also add the option `--remote` the python command like so:
 poetry run python pipeline/compile_and_run_pipeline.py --remote
 ```
 
-### From the Kubeflow UI
+#### From the Kubeflow UI
 
 The pipeline can be executed directly from the Kubeflow UI.
 This method is convenient but requires either that the pipeline has been previously run in the same namespace, or that you have access to the compiled pipeline YAML file.
 
-## Accessing the deployed model
+### Accessing the deployed model
 
 Final result of the pipeline is a KServe [InferenceService](https://kserve.github.io/website/0.11/get_started/first_isvc/)
 that provides a REST API where the model can be queried. The full URL of the model API can be found in the UI or by running:
@@ -156,7 +252,7 @@ where `request.json` has the following structure:
 ```
 
 
-## How to Contribute
+### How to Contribute
 
 1. **Type Hinting**: Always use type hinting in Python code.
 2. **Docstrings**: Lets try to follow [Google's style guide for Python docstrings](https://google.github.io/styleguide/pyguide.html).
@@ -165,7 +261,7 @@ where `request.json` has the following structure:
    - Clean up your commits to maintain a clear history.
    - Rebase your branch to the latest master before submitting a pull request.
 
-### Random collection of commands:
+#### Random collection of commands:
 
 Run Dask preprocessing locally (from within a kf-notebook), e.g. for debugging.
 
