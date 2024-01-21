@@ -119,34 +119,42 @@ The repository structure is outlined below:
 
 ```text
 .
+├── Dockerfile
+├── LICENSE
+├── README.md
+├── assets
+│   ├── katib-plot-trial.png
+│   ├── ...
 ├── config.toml
 ├── container_component_src
+│   ├── __init__.py
 │   ├── dask_preprocessor
 │   │   ├── __init__.py
 │   │   └── preprocessor.py
+│   ├── eval
+│   │   ├── __init__.py
+│   │   └── evaluator.py
+│   ├── main.py
 │   ├── model
 │   │   ├── __init__.py
 │   │   ├── callbacks.py
 │   │   ├── datamodule.py
 │   │   └── lightning_module.py
-│   ├── __init__.py
-│   ├── main.py
+│   ├── model_serving.py
+│   ├── serving
+│   │   ├── __init__.py
+│   │   └── kserve.py
 │   └── utils.py
-├── Dockerfile
-├── LICENSE
 ├── local_data
 ├── notebooks
-│   └── 01_exploration.ipynb
 ├── pipeline
+│   ├── __init__.py
 │   ├── auth_session.py
 │   ├── compile_and_run_pipeline.py
 │   ├── components.py
-│   ├── __init__.py
-│   ├── pipeline_definition.py
+│   └── pipeline_definition.py
 ├── poetry.lock
-├── pyproject.toml
-├── pyproject.toml
-└── README.md
+└── pyproject.toml
 ```
 
 ### Installation
