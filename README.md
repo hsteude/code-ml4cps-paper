@@ -37,9 +37,9 @@ precomputed artifacts in MinIO.
 ![kfp-dag](./assets/pipeline-all.png)
 
 
-The following screenshot shows the sub-pipeline visualized at the top of
-the main DAG (`split-parquet-files`). In this DAG, tasks that split yearly archives into smaller files
-run in parallel.
+The following screenshot shows the sub-pipeline visualized at the top of the
+main DAG (`split-parquet-files`). In this DAG, tasks that split yearly archives
+into smaller files run in parallel.
 
 ![kfp-subpipeline-dat](./assets/subpipeline-split-parquet.png)
 
@@ -105,15 +105,19 @@ PyTorch Model, and the Transformer, responsible for scaling the data.
 ## Technical Readme
 ### Project Structure
 
-All necessary components for defining, compiling, and executing the pipeline are contained within a single Python package named `pipeline`.
-The `container_component_src` directory contains Python code for custom container images used for various tasks, including Dask workers, PyTorch training jobs, Katib hyperparameter tuning, and more.
-The idea is to use a single image for all these applications, defining individual commands for different tasks.
-This setup includes a single `Dockerfile` at the root of this directory and a `.gitlab-ci.yml` file for automated builds in GitLab.
+All necessary components for defining, compiling, and executing the pipeline
+are contained within a single Python package named `pipeline`. The
+`container_component_src` directory contains Python code for custom container
+images used for various tasks, including Dask workers, PyTorch training jobs,
+Katib hyperparameter tuning, and more. The idea is to use a single image for
+all these applications, defining individual commands for different tasks. This
+setup includes a single `Dockerfile` at the root of this directory and a
+`.gitlab-ci.yml` file for automated builds in GitLab.
 
-A `config.toml` file is used to store constants and path configurations.
-The project employs `Poetry` for package management.
-All Jupyter notebooks, such as those for data exploration and analysis, are located in the `notebooks` directory.
-The `local_data` directory, while empty, is intended for local development.
+A config.toml file is used to store constants and path configurations. The
+project employs Poetry for package management. The notebooks directory is
+included as a placeholder for potential future use. The local_data directory,
+although currently empty, is designated for local development purposes.
 
 The repository structure is outlined below:
 
@@ -165,13 +169,15 @@ To install the Python project locally, execute the following command:
 poetry install
 ```
 
-This command will set up the project with all necessary dependencies as defined in the pyproject.toml file.
+This command will set up the project with all necessary dependencies as defined
+in the pyproject.toml file.
 
 ### Building the Image
 
-The Docker image for this project is set up to build automatically via GitLab's CI/CD pipeline upon pushing your code.
-The CI pipeline builds the Docker image with two tags: latest and a short hash of the corresponding commit.
-The registry URL for the image is specified in the config.toml file.
+The Docker image for this project is set up to build automatically via GitLab's
+CI/CD pipeline upon pushing your code. The CI pipeline builds the Docker image
+with two tags: latest and a short hash of the corresponding commit. The
+registry URL for the image is specified in the config.toml file.
 
 You can also build the image locally using the following command:
 
@@ -192,7 +198,10 @@ There are multiple ways to execute the Kubeflow pipeline:
 
 #### From a Kubeflow Notebook (KF-Notebook)
 
-Within a Kubeflow notebook environment in the cluster, all necessary environment variables and permissions should already be set. After building and pushing the image to the specified registry (as noted in config.toml), you can run the pipeline with:
+Within a Kubeflow notebook environment in the cluster, all necessary
+environment variables and permissions should already be set. After building and
+pushing the image to the specified registry (as noted in config.toml), you can
+run the pipeline with:
 
 ```sh
 poetry run python pipeline/compile_and_run_pipeline.py
@@ -208,10 +217,11 @@ This can be done using the following kubectl command:
 kubectl port-forward -n minio svc/defaulttenant-hl 9000:9000
 ```
 
-Alternatively, tools like k9s or Lens can be used for port forwarding.
-If you lack the required permissions, please contact your system administrator.
+Alternatively, tools like k9s or Lens can be used for port forwarding. If you
+lack the required permissions, please contact your system administrator.
 
-To run the pipeline locally (from a remote machine outside the cluster), create a `.env` file in the root of this project with the following content:
+To run the pipeline locally (from a remote machine outside the cluster), create
+a `.env` file in the root of this project with the following content:
 
 ```toml
 KUBEFLOW_ENDPOINT='https://example-url'
@@ -234,18 +244,21 @@ poetry run python pipeline/compile_and_run_pipeline.py --remote
 
 #### From the Kubeflow UI
 
-The pipeline can be executed directly from the Kubeflow UI.
-This method is convenient but requires either that the pipeline has been previously run in the same namespace, or that you have access to the compiled pipeline YAML file.
+The pipeline can be executed directly from the Kubeflow UI. This method is
+convenient but requires either that the pipeline has been previously run in the
+same namespace, or that you have access to the compiled pipeline YAML file.
 
 ### Accessing the deployed model
 
-Final result of the pipeline is a KServe [InferenceService](https://kserve.github.io/website/0.11/get_started/first_isvc/)
-that provides a REST API where the model can be queried. The full URL of the model API can be found in the UI or by running:
+The final result of the pipeline is a KServe
+[InferenceService](https://kserve.github.io/website/0.11/get_started/first_isvc/)
+that provides a REST API where the model can be queried. The full URL of the
+model API can be found in the UI or by running:
 ```shell
 kubectl get inferenceservice -n samo-turk vae -o=jsonpath='{.status.address.url}'
 ```
-*Note that this is internal URL reachable from the cluster. Configuring model access from the outside is beyond the 
-scope.*  
+*Note that this is a internal URL reachable from the cluster. Configuring model
+access from the outside is beyond the scope.*  
 
 Model can be queried within the cluster with:
 ```shell
@@ -270,8 +283,13 @@ where `request.json` has the following structure:
    - Rebase your branch to the latest master before submitting a pull request.
 
 #### Random collection of commands:
+This section contains some example commands that might be useful for
+development. Note that all the paths, images, etc., need to be changed. These
+commands are just examples.
 
-Run Dask preprocessing locally (from within a kf-notebook), e.g. for debugging.
+
+
+##### Run Dask preprocessing locally (from within a kf-notebook), e.g. for debugging.
 
 ```bash
 poetry run python container_component_src/main.py run_dask_preprocessing \
@@ -284,13 +302,13 @@ poetry run python container_component_src/main.py run_dask_preprocessing \
 --num-dask-workers 4
 ```
 
-Install ipykernel for this virtual environment:
+##### Install ipykernel for this virtual environment:
 
 ```sh
 poetry run ipython kernel install --name "ml4cps" --user
 ```
 
-Run Pytorch trianing locally in a notebook pod
+##### Run Pytorch trianing locally in a notebook pod
 ```sh
 poetry run python container_component_src/main.py run_training \
   --train-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/train_df_scaled" \
@@ -309,7 +327,7 @@ poetry run python container_component_src/main.py run_training \
   --num-dl-workers 12
 ```
 
-Run evaluation locally in a notebook pod
+##### Run evaluation locally in a notebook pod
 ```sh
 poetry run python container_component_src/main.py run_evaluation \
   --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/val_df_scaled" \
