@@ -23,8 +23,10 @@ experiments.
 
 ### Pipeline DAG
 The image below shows a screenshot of the Directed Acyclic Graph (DAG) of our
-KFP pipeline. The boxes with yellow directory icons represent pipeline artifacts
-stored in MinIO. The boxes containing blue icons and green checkmarks represent
+[KFP pipeline](https://www.kubeflow.org/docs/components/pipelines/v2/). The boxes 
+with yellow directory icons represent pipeline 
+[artifacts](https://www.kubeflow.org/docs/components/pipelines/v2/data-types/artifacts/)
+stored in object storage (MinIO). The boxes containing blue icons and green checkmarks represent
 the pipeline steps. In the Kubeflow documentation, these steps are referred to
 as 'Tasks.' Each Task represents the execution of a Kubeflow Pipelines
 component, consisting of a container image, a command, and input/output
@@ -33,37 +35,36 @@ executed concurrently. If a task has previously been executed with the same
 configuration, the results are cached, meaning they are loaded from the
 precomputed artifacts in MinIO.
 
-
-![kfp-dag](./assets/pipeline-all.png)
-
+<img src="assets/pipeline-all.png" alt="kfp-dag" width="1000"/>
 
 The following screenshot shows the sub-pipeline visualized at the top of the
 main DAG (`split-parquet-files`). In this DAG, tasks that split yearly archives
 into smaller files run in parallel.
 
-![kfp-subpipeline-dat](./assets/subpipeline-split-parquet.png)
+<img src="assets/subpipeline-split-parquet.png" alt="kfp-subpipeline-dat" width="1000"/>
 
 Model deployment with KServe occurs only if the trained model achieves a
 composite F score higher than a user-defined threshold. This pipeline is also
 represented as a sub-pipeline in the main DAG (lower left of the main DAG:
 `condition-1`):
 
-![kfp-subpipeline-dat](./assets/subpipeline-if-clause.png)
+<img src="assets/subpipeline-if-clause.png" alt="kfp-subpipeline-dat2" width="1000"/>
 
 ### KFP Visualizations
 In KFP, tasks can have special output types that allow visualizations to be
 displayed within the Kubeflow UI. We utilized this feature in our case study to
 visualize the model evaluation. For instance, we plotted the likelihood of our
 VAE for anomaly detection over time, as described in the paper. The same plot
-can be rendered as HTML and displayed as an output of the KFP task in the UI.
+can be rendered as [HTML](https://kubeflow-pipelines.readthedocs.io/en/latest/source/dsl.html#kfp.dsl.HTML)
+and displayed as an output of the KFP task in the UI.
 Here is a screenshot illustrating this:
 
-![kfp-viz-metric](./assets/kfp-viz-html.png)
+<img src="assets/kfp-viz-html.png" alt="kfp-viz-html" width="1000"/>
 
-Moreover, KFP offers the capability to display metrics in a similar manner,
-which we also utilized in our case study:
+Moreover, KFP offers the capability to display [metrics](https://kubeflow-pipelines.readthedocs.io/en/latest/source/dsl.html#kfp.dsl.Metrics)
+in a similar manner, which we also utilized in our case study:
 
-![kfp-viz-html](./assets/kfp-viz-metrics.png)
+<img src="assets/kfp-viz-metrics.png" alt="kfp-viz-metric" width="800"/>
 
 ### Cloning and Comparing Pipeline Runs
 Pipeline tasks can be executed with various inputs. This also applies to entire
@@ -72,19 +73,19 @@ parameter tuning or retraining in response to data drift. These reruns can be
 automatically triggered, but KFP also provides a UI feature to reconfigure and
 restart the pipeline:
 
-![kfp-clone](./assets/kfp-start-clone-new-params.png)
+<img src="assets/kfp-start-clone-new-params.png" alt="kfp-clone" width="600"/>
 
 Finally, the UI allows comparing different runs of a pipeline in terms of their
 outputs:
 
-![kfp-compare](./assets/kfp-compaare.png)
+<img src="assets/kfp-compaare.png" alt="kfp-compaare" width="1000"/>
 
 ### Katib Experiment Visualization
 
-Katib automatically generates a hyperparameter tuning plot, which is displayed
-in the UI.
+[Katib](https://www.kubeflow.org/docs/components/katib/overview/) automatically 
+generates a hyperparameter tuning plot, which is displayed in the UI.
 
-![katib-plot](./assets/katib-plot.png)
+<img src="assets/katib-plot.png" alt="katib-plot" width="1000"/>
 
 Additionally, each trial in Katib (a trial being a run of training with a set of
 hyperparameters) has its own view. In this view, the course of logged metrics
@@ -92,14 +93,14 @@ over time is plotted by default (in our case, training and validation loss).
 There is also a tab showing the actual standard out logs of the trial pod in the
 UI.
 
-![kfp-katib-trial](./assets/katib-plot-trial.png)
+<img src="assets/katib-plot-trial.png" alt="katib-plot-trial" width="1000"/>
 
 ### Kserve
-In the KServe UI, logs from individual model pods are displayed among other
-features. In our case, this includes the logs of the Predictor that serves the
+In the [KServe](https://kserve.github.io/website/latest/) UI, logs from individual 
+model pods are displayed among other features. In our case, this includes the logs of the Predictor that serves the
 PyTorch Model, and the Transformer, responsible for scaling the data.
 
-![kserve](./assets/kserve-logs.png)
+<img src="assets/kserve-logs.png" alt="kserve-logs" width="1000"/>
 
 
 ## Technical Readme
