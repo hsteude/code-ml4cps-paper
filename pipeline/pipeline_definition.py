@@ -1,4 +1,5 @@
 from kfp import dsl
+from kfp import kubernetes
 from typing import List
 import os
 import toml
@@ -28,12 +29,14 @@ with open(f"{os.path.dirname(os.path.abspath(__file__))}/../config.toml", "r") a
 def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
     """Adds environment variables for minio to the tasks"""
     for task in task_list:
-        task.set_env_variable(
-            "AWS_SECRET_ACCESS_KEY", os.environ["AWS_SECRET_ACCESS_KEY"]
-        ).set_env_variable(
-            "AWS_ACCESS_KEY_ID", os.environ["AWS_ACCESS_KEY_ID"]
-        ).set_env_variable(
-            "S3_ENDPOINT", "minio.minio"
+        kubernetes.use_secret_as_env(
+            task,
+            secret_name="s3creds",
+            secret_key_to_env={
+                "AWS_ACCESS_KEY_ID": "AWS_ACCESS_KEY_ID",
+                "AWS_SECRET_ACCESS_KEY": "AWS_SECRET_ACCESS_KEY",
+                "S3_ENDPOINT": "S3_ENDPOINT",
+            }
         )
 
 
