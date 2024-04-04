@@ -33,11 +33,12 @@ This script needs a bunch of env variables (or .env file with dotenv package ins
     from pipeline.pipeline_definition import columbus_eclss_ad_pipeline
     from pipeline.auth_session import get_istio_auth_session
 
-    # Infer namespace from username if no namespace provided
-    namespace = os.environ.get('KUBEFLOW_NAMESPACE', None) or \
-        os.environ['KUBEFLOW_USERNAME'].split("@")[0].replace(".", "-")
 
     if remote:
+        # Infer namespace from username if no namespace provided
+        namespace = os.environ.get('KUBEFLOW_NAMESPACE', None) or \
+            os.environ['KUBEFLOW_USERNAME'].split("@")[0].replace(".", "-")
+
         auth_session = get_istio_auth_session(
             url=os.environ["KUBEFLOW_ENDPOINT"],
             username=os.environ["KUBEFLOW_USERNAME"],
