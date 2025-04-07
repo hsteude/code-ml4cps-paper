@@ -35,9 +35,12 @@ def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
             secret_key_to_env={
                 "AWS_ACCESS_KEY_ID": "AWS_ACCESS_KEY_ID",
                 "AWS_SECRET_ACCESS_KEY": "AWS_SECRET_ACCESS_KEY",
-                "S3_ENDPOINT": "S3_ENDPOINT",
-            }
+            },
         )
+            # Add S3_ENDPOINT from environment variable
+        s3_endpoint = os.environ.get("S3_ENDPOINT")
+        if s3_endpoint:
+            task.set_env_variable(name="S3_ENDPOINT", value=os.environ.get("S3_ENDPOINT"))
 
 
 # define pipeline
@@ -128,63 +131,63 @@ def columbus_eclss_ad_pipeline(
         label_column=config["col-names"]["ar_col"],
     )
 
-    katib_task = run_katib_experiment(
-        df_train=scale_data_task.outputs["train_df_scaled"],
-        df_val=scale_data_task.outputs["val_df_scaled"],
-        experiment_name=f"columbus-anomaly-detection-ml4cps",
-        image=config["images"]["tuning"],
-        namespace=config["platform"]["namespace"],
-        max_epochs=katib_max_epochs,
-        max_trials=katib_max_trials,
-        batch_size_list=katib_batch_size_list,
-        beta_list=katib_beta_list,
-        learning_rate_list=katib_learning_rate_list,
-        latent_dim=latent_dim,
-    )
-
-    train_model_task = run_pytorch_training_job(
-        train_df_in=scale_data_task.outputs["train_df_scaled"],
-        val_df_in=scale_data_task.outputs["val_df_scaled"],
-        minio_model_bucket=config["paths"]["minio_model_bucket"],
-        training_image=config["images"]["training"],
-        namespace=config["platform"]["namespace"],
-        tuning_param_dct=katib_task.output,
-        num_dl_workers=pytorchjob_num_dl_workers,
-        max_epochs=pytorchjob_max_epochs,
-        early_stopping_patience=pytorchjob_early_stopping_patience,
-        latent_dim=latent_dim,
-        num_gpu_nodes=pytorchjob_num_gpu_nodes,
-        seed=42,
-    )
-
-    evaluation_task = run_evaluation(
-        model_path=train_model_task.output,
-        val_df_in=scale_data_task.outputs["val_df_scaled"],
-        test_df_in=scale_data_task.outputs["test_df_scaled"],
-        label_col_name=config["col-names"]["ar_col"],
-        device="cuda",
-        batch_size=eval_batch_size,
-        threshold_min=eval_threshold_min,
-        threshold_max=eval_threshold_max,
-        number_thresholds=eval_number_thresholds,
-    )
-    add_minio_env_vars_to_tasks([evaluation_task])
-
-    visualize_results_task = visualize_results(
-        result_df_in=evaluation_task.outputs["result_df"],
-        metrics_json=evaluation_task.outputs["metrics_dict"],
-        sample_fraction=viz_sample_fraction,
-        label_col_name=config["col-names"]["ar_col"],
-        scatter_y_min=-4000,
-        scatter_y_max=500
-    )
-
-    composite_f1 = extract_composite_f1(metrics_json=evaluation_task.outputs['metrics_dict'])
-    scaler_path = extract_scaler_path(scaler=fit_scaler_task.output)
-    with dsl.If(composite_f1.output > threshold):
-        serve_task = serve_model(
-            model_path=train_model_task.output,
-            scaler_path=scaler_path.output,
-            prod_path=f'minio://{config["paths"]["prod_path"]}',
-            serving_image=config["images"]["serving"])
-        add_minio_env_vars_to_tasks([serve_task])
+    # katib_task = run_katib_experiment(
+    #     df_train=scale_data_task.outputs["train_df_scaled"],
+    #     df_val=scale_data_task.outputs["val_df_scaled"],
+    #     experiment_name=f"columbus-anomaly-detection-ml4cps",
+    #     image=config["images"]["tuning"],
+    #     namespace=config["platform"]["namespace"],
+    #     max_epochs=katib_max_epochs,
+    #     max_trials=katib_max_trials,
+    #     batch_size_list=katib_batch_size_list,
+    #     beta_list=katib_beta_list,
+    #     learning_rate_list=katib_learning_rate_list,
+    #     latent_dim=latent_dim,
+    # )
+    #
+    # train_model_task = run_pytorch_training_job(
+    #     train_df_in=scale_data_task.outputs["train_df_scaled"],
+    #     val_df_in=scale_data_task.outputs["val_df_scaled"],
+    #     minio_model_bucket=config["paths"]["minio_model_bucket"],
+    #     training_image=config["images"]["training"],
+    #     namespace=config["platform"]["namespace"],
+    #     tuning_param_dct=katib_task.output,
+    #     num_dl_workers=pytorchjob_num_dl_workers,
+    #     max_epochs=pytorchjob_max_epochs,
+    #     early_stopping_patience=pytorchjob_early_stopping_patience,
+    #     latent_dim=latent_dim,
+    #     num_gpu_nodes=pytorchjob_num_gpu_nodes,
+    #     seed=42,
+    # )
+    #
+    # evaluation_task = run_evaluation(
+    #     model_path=train_model_task.output,
+    #     val_df_in=scale_data_task.outputs["val_df_scaled"],
+    #     test_df_in=scale_data_task.outputs["test_df_scaled"],
+    #     label_col_name=config["col-names"]["ar_col"],
+    #     device="cuda",
+    #     batch_size=eval_batch_size,
+    #     threshold_min=eval_threshold_min,
+    #     threshold_max=eval_threshold_max,
+    #     number_thresholds=eval_number_thresholds,
+    # )
+    # add_minio_env_vars_to_tasks([evaluation_task])
+    #
+    # visualize_results_task = visualize_results(
+    #     result_df_in=evaluation_task.outputs["result_df"],
+    #     metrics_json=evaluation_task.outputs["metrics_dict"],
+    #     sample_fraction=viz_sample_fraction,
+    #     label_col_name=config["col-names"]["ar_col"],
+    #     scatter_y_min=-4000,
+    #     scatter_y_max=500
+    # )
+    #
+    # composite_f1 = extract_composite_f1(metrics_json=evaluation_task.outputs['metrics_dict'])
+    # scaler_path = extract_scaler_path(scaler=fit_scaler_task.output)
+    # with dsl.If(composite_f1.output > threshold):
+    #     serve_task = serve_model(
+    #         model_path=train_model_task.output,
+    #         scaler_path=scaler_path.output,
+    #         prod_path=f'minio://{config["paths"]["prod_path"]}',
+    #         serving_image=config["images"]["serving"])
+    #     add_minio_env_vars_to_tasks([serve_task])
