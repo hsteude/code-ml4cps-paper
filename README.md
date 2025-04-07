@@ -167,7 +167,8 @@ The repository structure is outlined below:
 To install the Python project locally, execute the following command:
 
 ```sh
-poetry install
+uv venv # if you did not create a virtual env yet
+uv sunc
 ```
 
 This command will set up the project with all necessary dependencies as defined
@@ -263,8 +264,6 @@ access from the outside is beyond the scope.*
 
 Model can be queried within the cluster with:
 ```shell
-# KServe<=0.10
-curl -H "Content-Type: application/json" -k "<internal-url>"  -d @request.json
 # KServe>=0.11
 curl  -H "Content-Type: application/json" -k <internal-url>/v1/models/<model-name>:predict -d @request.json
 ```
@@ -304,14 +303,18 @@ poetry run python container_component_src/main.py run_dask_preprocessing \
 ```
 
 ##### Install ipykernel for this virtual environment:
-
+Activate your virtual env e.g. like so:
 ```sh
-poetry run ipython kernel install --name "ml4cps" --user
+source .venv/bin/activate
+```
+Once the venv is actiated, run:
+```sh
+python -m ipython kernel install --name "ml4cps" --user
 ```
 
 ##### Run Pytorch trianing locally in a notebook pod
 ```sh
-poetry run python container_component_src/main.py run_training \
+python container_component_src/main.py run_training \
   --train-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/train_df_scaled" \
   --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/val_df_scaled" \
   --seed 42 \
@@ -330,7 +333,7 @@ poetry run python container_component_src/main.py run_training \
 
 ##### Run evaluation locally in a notebook pod
 ```sh
-poetry run python container_component_src/main.py run_evaluation \
+python container_component_src/main.py run_evaluation \
   --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/val_df_scaled" \
   --test-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/test_df_scaled" \
   --batch-size 1024 \
