@@ -17,7 +17,7 @@ from pipeline.components import (
     visualize_results,
     extract_composite_f1,
     extract_scaler_path,
-    serve_model
+    serve_model,
 )
 from container_component_src.utils import create_s3_client
 
@@ -27,7 +27,7 @@ with open(f"{os.path.dirname(os.path.abspath(__file__))}/../config.toml", "r") a
 
 
 def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
-    """Adds environment variables for minio to the tasks"""
+    """Adds environment variables for MinIO to the tasks"""
     for task in task_list:
         kubernetes.use_secret_as_env(
             task,
@@ -78,7 +78,7 @@ def columbus_eclss_ad_pipeline(
     eval_threshold_min: int = -200,
     eval_threshold_max: int = -100,
     eval_number_thresholds: int = 100,
-    threshold: float = 0.7
+    threshold: float = 0.7,
 ):
     split_parquet_files_task = split_parquet_files_sub_pipeline(
         rowgroups_per_file=rowgroups_per_file

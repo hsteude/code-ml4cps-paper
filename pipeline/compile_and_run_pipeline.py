@@ -19,15 +19,15 @@ except ModuleNotFoundError:
 def run(remote):
     """Compile and run the Kubeflow pipeline.
 
-This script needs a bunch of env variables (or .env file with dotenv package installed):
+    This script needs a bunch of env variables (or .env file with dotenv package installed):
 
-\nKUBEFLOW_ENDPOINT
-\nKUBEFLOW_USERNAME
-\nKUBEFLOW_PASSWORD
-\nKUBEFLOW_NAMESPACE (optional inferred from KUBEFLOW_USERNAME if not provided)
-\nS3_ENDPOINT
-\nAWS_ACCESS_KEY_ID
-\nAWS_SECRET_ACCESS_KEY
+    KUBEFLOW_ENDPOINT
+    KUBEFLOW_USERNAME
+    KUBEFLOW_PASSWORD
+    KUBEFLOW_NAMESPACE (optional inferred from KUBEFLOW_USERNAME if not provided)
+    S3_ENDPOINT
+    AWS_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY
 
     """
     from pipeline.pipeline_definition import columbus_eclss_ad_pipeline
