@@ -19,6 +19,7 @@ from pipeline.components import (
     extract_composite_f1,
     extract_scaler_path,
     serve_model,
+    say_hi
 )
 from container_component_src.utils import create_s3_client
 
@@ -189,9 +190,10 @@ def columbus_eclss_ad_pipeline(
         scatter_y_max=500
     )
 
-    # composite_f1 = extract_composite_f1(metrics_json=evaluation_task.outputs['metrics_dict'])
-    # scaler_path = extract_scaler_path(scaler=fit_scaler_task.output)
-    # with dsl.If(composite_f1.output > threshold):
+    composite_f1_task = extract_composite_f1(metrics_dict=evaluation_task.outputs['Output'])
+    scaler_path_task = extract_scaler_path(scaler=fit_scaler_task.output)
+    with dsl.If(composite_f1_task.output > threshold):
+        say_hi_scaler_task = say_hi(input_word=scaler_path_task.output)
     #     serve_task = serve_model(
     #         model_path=train_model_task.output,
     #         scaler_path=scaler_path.output,

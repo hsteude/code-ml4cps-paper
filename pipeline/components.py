@@ -990,18 +990,18 @@ def visualize_results(
 
 
 @dsl.component(
-    packages_to_install=[],
     base_image="python:3.9",
 )
 def extract_composite_f1(
-    metrics_json: Input[Dataset],
+    metrics_dict: Dict,
 ) -> float:
     """Extracts composite F1 score from metrics"""
-    import json
-
-    with open(metrics_json.path, "r") as file:
-        metrics_dict = json.load(file)
     return float(metrics_dict['composite_f1'])
+
+@dsl.component()
+def say_hi(input_words: str) -> str:
+    """Says Hi"""
+    return f'Hi {input_word}'
 
 
 @dsl.component(
