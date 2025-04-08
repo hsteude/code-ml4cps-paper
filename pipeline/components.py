@@ -816,50 +816,87 @@ def run_pytorch_training_job(
 
         time.sleep(10)
 
+from kfp import dsl
+from kfp.dsl import Input, Output, Dataset, component
+import json
+import numpy as np
+import pandas as pd
 
-@dsl.container_component
-def run_evaluation(
-    model_path: str,
-    val_df_in: Input[Dataset],
-    test_df_in: Input[Dataset],
-    label_col_name: str,
-    device: str,
-    batch_size: int,
-    result_df: Output[Dataset],
-    metrics_dict: Output[Artifact],
-    threshold_min: int,
-    threshold_max: int,
-    number_thresholds: int,
-):
-    return dsl.ContainerSpec(
-        image=f'{config["images"]["evaluation"]}',
-        command=["python", "container_component_src/main.py"],
-        args=[
-            "run_evaluation",
-            "--model-path",
-            model_path,
-            "--val-df-path",
-            val_df_in.path,
-            "--test-df-path",
-            test_df_in.path,
-            "--label-col-name",
-            label_col_name,
-            "--device",
-            device,
-            "--batch-size",
-            batch_size,
-            "--result-df-path",
-            result_df.path,
-            "--metrics-dict-path",
-            metrics_dict.path,
-            "--threshold-min",
-            threshold_min,
-            "--threshold-max",
-            threshold_max,
-            "--number-thresholds",
-            number_thresholds,
-        ],
+
+@dsl.component(
+    base_image=f'{config["images"]["evaluation"]}',
+    packages_to_install=["pandas", "numpy", "pyarrow", "mlflow"],
+)
+def evaluate_model(
+    train_out_dict: dict,
+    val_df: Input[Dataset],
+    test_df: Input[Dataset],
+    mlflow_uri: str,
+    minio_endpoint_url: str,
+    mlflow_experiment_name: str,
+    results_df: Output[Dataset],
+    label_col_name: str = "Anomaly",
+    device: str = "cuda",
+    batch_size: int = 512,
+    threshold_min: int = -1500,
+    threshold_max: int = 0,
+    number_thresholds: int = 500
+) -> dict:
+    """
+    Komponente zur Evaluierung eines trainierten Modells aus MLflow.
+    
+    Args:
+        train_out_dict: Dictionary mit MLflow Run-Informationen (muss 'run_name' enthalten)
+        val_df_path: Pfad zum Validierungs-Dataframe
+        test_df_path: Pfad zum Test-Dataframe
+        mlflow_uri: URI zum MLflow Tracking Server
+        minio_endpoint_url: URL zum Minio/S3 Endpoint
+        results_df: KFP Output Dataset für den Ergebnis-DataFrame
+        label_col_name: Name der Spalte mit den Labels
+        device: Gerät für die Berechnung (cuda/cpu)
+        batch_size: Batch-Größe für Datenlader
+        threshold_min: Minimaler Threshold-Wert
+        threshold_max: Maximaler Threshold-Wert
+        number_thresholds: Anzahl der zu evaluierenden Thresholds
+        
+    Returns:
+        Dictionary mit Evaluierungsmetriken
+    """
+    # Import ModelEvaluator from your package
+    from container_component_src.eval.evaluator import ModelEvaluator
+    import os
+    
+    #Set AWS/Minio environment variables
+    os.environ["AWS_ENDPOINT_URL"] = minio_endpoint_url
+    
+    # Extract run name from dictionary
+    run_name = train_out_dict.get('run_name')
+    if not run_name:
+        raise ValueError("train_out_dict muss einen 'run_name' enthalten")
+    
+    # Initialize and run ModelEvaluator
+    evaluator = ModelEvaluator(
+        val_df_path=val_df.path,
+        test_df_path=test_df.path,
+        run_name=run_name,
+        mlflow_uri=mlflow_uri,
+        mlflow_experiment_name=mlflow_experiment_name,
+        minio_endpoint_url=minio_endpoint_url,
+        label_col_name=label_col_name,
+        batch_size=batch_size,
+        device=device,
+        threshold_min=threshold_min,
+        threshold_max=threshold_max,
+        num_thresholds=number_thresholds,
     )
+    
+    
+    # run eval
+    result_df, metrics_dict = evaluator.run()
+    
+    result_df.to_parquet(results_df.path)
+    
+    return metrics_dict
 
 
 @dsl.component(
@@ -868,7 +905,7 @@ def run_evaluation(
 )
 def visualize_results(
     result_df_in: Input[Dataset],
-    metrics_json: Input[Dataset],
+    metrics_dict: Dict,
     result_viz: Output[HTML],
     metrics: Output[Metrics],
     sample_fraction: float = 0.1,
@@ -881,9 +918,6 @@ def visualize_results(
     import plotly.graph_objs as go
     import pandas as pd
     import json
-
-    with open(metrics_json.path, "r") as file:
-        metrics_dict = json.load(file)
 
     for k, v in metrics_dict.items():
         metrics.log_metric(metric=k, value=v)

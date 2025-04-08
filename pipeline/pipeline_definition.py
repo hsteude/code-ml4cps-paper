@@ -14,7 +14,7 @@ from pipeline.components import (
     visualize_split,
     run_katib_experiment,
     run_pytorch_training_job,
-    run_evaluation,
+    evaluate_model,
     visualize_results,
     extract_composite_f1,
     extract_scaler_path,
@@ -163,28 +163,32 @@ def columbus_eclss_ad_pipeline(
         minio_endpoint_url=config["platform"]["minio_endpoint"],
     )
 
-    # evaluation_task = run_evaluation(
-    #     model_path=train_model_task.output,
-    #     val_df_in=scale_data_task.outputs["val_df_scaled"],
-    #     test_df_in=scale_data_task.outputs["test_df_scaled"],
-    #     label_col_name=config["col-names"]["ar_col"],
-    #     device="cuda",
-    #     batch_size=eval_batch_size,
-    #     threshold_min=eval_threshold_min,
-    #     threshold_max=eval_threshold_max,
-    #     number_thresholds=eval_number_thresholds,
-    # )
-    # add_minio_env_vars_to_tasks([evaluation_task])
-    #
-    # visualize_results_task = visualize_results(
-    #     result_df_in=evaluation_task.outputs["result_df"],
-    #     metrics_json=evaluation_task.outputs["metrics_dict"],
-    #     sample_fraction=viz_sample_fraction,
-    #     label_col_name=config["col-names"]["ar_col"],
-    #     scatter_y_min=-4000,
-    #     scatter_y_max=500
-    # )
-    #
+    # Modell-Evaluierungsschritt
+    evaluation_task = evaluate_model(
+        val_df=scale_data_task.outputs["val_df_scaled"],
+        test_df=scale_data_task.outputs["test_df_scaled"],
+        train_out_dict=train_model_task.output,
+        mlflow_uri=config["platform"]["mlflow_uri"],
+        mlflow_experiment_name=config["platform"]["mlflow_experiment_name"],
+        minio_endpoint_url=config["platform"]["minio_endpoint"],
+        label_col_name="Anomaly",
+        device="cpu",
+        batch_size=eval_batch_size,
+        threshold_min=eval_threshold_min,
+        threshold_max=eval_threshold_max,
+        number_thresholds=eval_number_thresholds,
+    )
+    add_minio_env_vars_to_tasks([evaluation_task])
+
+    visualize_results_task = visualize_results(
+        result_df_in=evaluation_task.outputs["results_df"],
+        metrics_dict=evaluation_task.outputs["Output"],
+        sample_fraction=viz_sample_fraction,
+        label_col_name=config["col-names"]["ar_col"],
+        scatter_y_min=-4000,
+        scatter_y_max=500
+    )
+
     # composite_f1 = extract_composite_f1(metrics_json=evaluation_task.outputs['metrics_dict'])
     # scaler_path = extract_scaler_path(scaler=fit_scaler_task.output)
     # with dsl.If(composite_f1.output > threshold):

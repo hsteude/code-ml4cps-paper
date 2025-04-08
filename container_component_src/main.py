@@ -385,36 +385,42 @@ def run_training(
 
 
 @cli.command("run_evaluation")
-@click.option("--model-path", type=str, required=True)
-@click.option("--val-df-path", type=str, required=True)
-@click.option("--test-df-path", type=str, required=True)
-@click.option("--label-col-name", type=str, required=True)
-@click.option("--device", type=str, required=True)
-@click.option("--batch-size", type=int, required=True)
-@click.option("--result-df-path", type=str, required=True)
-@click.option("--metrics-dict-path", type=str, required=True)
-@click.option("--threshold-min", type=int, required=True)
-@click.option("--threshold-max", type=int, required=True)
-@click.option("--number-thresholds", type=int, required=True)
+@click.option("--run-name", type=str, required=True, help="MLflow run name to load the model from")
+@click.option("--val-df-path", type=str, required=True, help="Path to validation dataframe")
+@click.option("--test-df-path", type=str, required=True, help="Path to test dataframe")
+@click.option("--mlflow-uri", type=str, required=True, help="URI to MLflow tracking server")
+@click.option("--minio-endpoint-url", type=str, required=True, help="URL to Minio/S3 endpoint")
+@click.option("--label-col-name", type=str, required=True, help="Column name for labels")
+@click.option("--device", type=str, default="cuda", help="Device to run on (cuda/cpu)")
+@click.option("--batch-size", type=int, default=512, help="Batch size for data loading")
+@click.option("--result-df-path", type=str, required=True, help="Path to save result dataframe")
+@click.option("--metrics-dict-path", type=str, required=True, help="Path to save metrics dictionary")
+@click.option("--threshold-min", type=int, default=-1500, help="Minimum threshold value")
+@click.option("--threshold-max", type=int, default=0, help="Maximum threshold value")
+@click.option("--number-thresholds", type=int, default=500, help="Number of thresholds to evaluate")
 def run_evaluation(
     val_df_path: str,
     test_df_path: str,
-    model_path: str,
+    run_name: str,
+    mlflow_uri: str,
+    minio_endpoint_url: str,
     label_col_name: str,
     device: str,
     batch_size: int,
     result_df_path: str,
     metrics_dict_path: str,
-    threshold_min:int,
-    threshold_max:int,
-    number_thresholds:int,
+    threshold_min: int,
+    threshold_max: int,
+    number_thresholds: int,
 ):
-    """Evaluation model performance"""
+    """Evaluate model performance using a model stored in MLflow"""
 
     me = ModelEvaluator(
         val_df_path=val_df_path,
         test_df_path=test_df_path,
-        model_path=model_path,
+        run_name=run_name,
+        mlflow_uri=mlflow_uri,
+        minio_endpoint_url=minio_endpoint_url,
         label_col_name=label_col_name,
         batch_size=batch_size,
         device=device,
@@ -422,10 +428,10 @@ def run_evaluation(
         threshold_max=threshold_max,
         num_thresholds=number_thresholds,
     )
-    result_df, metrics_dct = me.run()
+    result_df, metrics_dict = me.run()
     result_df.to_parquet(result_df_path)
     with open(metrics_dict_path, 'w') as file:
-        json.dump(metrics_dct, file)
+        json.dump(metrics_dict, file)
 
 
 
