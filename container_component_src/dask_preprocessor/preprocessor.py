@@ -10,6 +10,7 @@ class DaskPreprocessor:
         self,
         num_dask_workers: int,
         image: str,
+        namespace: str,
         storage_options: dict,
         sample_frac: float,
     ) -> None:
@@ -22,11 +23,11 @@ class DaskPreprocessor:
             storage_options: A dictionary containing storage configuration for reading data.
             sample_frac: The fraction of data to sample.
         """
-        self._create_dask_cluster(num_worker=num_dask_workers, image=image)
+        self._create_dask_cluster(num_worker=num_dask_workers, image=image, namespace=namespace)
         self.minio_storage_options = storage_options
         self.sample_frac = sample_frac
 
-    def _create_dask_cluster(self, num_worker: int, image: str) -> None:
+    def _create_dask_cluster(self, num_worker: int, image: str, namespace: str) -> None:
         """
         Creates a Dask cluster and connects a Dask client to it.
 
@@ -35,7 +36,7 @@ class DaskPreprocessor:
             image: The Docker image to use for the Dask workers.
         """
         logger.info(f"Creating dask cluster")
-        self.cluster = KubeCluster(name="preproc", image=image)
+        self.cluster = KubeCluster(name="preproc", image=image, namespace=namespace)
         self.cluster.scale(num_worker)
         self.client = Client(self.cluster)
 

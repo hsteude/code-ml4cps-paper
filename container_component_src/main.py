@@ -131,6 +131,7 @@ def run_dask_preprocessing(
     minio_endpoint: str,
     dask_worker_image: str,
     num_dask_workers: int,
+    namespace: str,
 ) -> None:
     """
     Runs the Dask preprocessing pipeline, which mainly does random sampling.
@@ -143,6 +144,7 @@ def run_dask_preprocessing(
         minio_endpoint: Endpoint URL of MinIO.
         dask_worker_image: Docker image to use for Dask workers.
         num_dask_workers: Number of workers to use in the Dask cluster.
+        namespace: Namespace for the Dask cluster.
     """
     minio_storage_option_dct = {
         "key": os.environ["AWS_ACCESS_KEY_ID"],
@@ -155,10 +157,10 @@ def run_dask_preprocessing(
         image=dask_worker_image,
         storage_options=minio_storage_option_dct,
         sample_frac=sample_frac,
+        namespace=namespace
     )
     df = prc.run(path_list=partitioned_telemetry_paths, timestamp_col=timestamp_col)
     df.to_parquet(df_out_path)
-
 
 @cli.command("run_training")
 @click.option("--train-df-path", type=str, required=True)

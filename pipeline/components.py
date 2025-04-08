@@ -46,6 +46,7 @@ def run_dask_preprocessing(
     minio_endpoint: str,
     dask_worker_image: str,
     num_dask_workers: int,
+    namespace: str
 ):
     """Kubeflow pipeline component for Dask preprocessing"""
     return dsl.ContainerSpec(
