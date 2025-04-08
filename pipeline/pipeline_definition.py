@@ -146,21 +146,23 @@ def columbus_eclss_ad_pipeline(
         minio_endpoint_url=config["platform"]["minio_endpoint"],
     )
  
-    # train_model_task = run_pytorch_training_job(
-    #     train_df_in=scale_data_task.outputs["train_df_scaled"],
-    #     val_df_in=scale_data_task.outputs["val_df_scaled"],
-    #     minio_model_bucket=config["paths"]["minio_model_bucket"],
-    #     training_image=config["images"]["training"],
-    #     namespace=config["platform"]["namespace"],
-    #     tuning_param_dct=katib_task.output,
-    #     num_dl_workers=pytorchjob_num_dl_workers,
-    #     max_epochs=pytorchjob_max_epochs,
-    #     early_stopping_patience=pytorchjob_early_stopping_patience,
-    #     latent_dim=latent_dim,
-    #     num_gpu_nodes=pytorchjob_num_gpu_nodes,
-    #     seed=42,
-    # )
-    #
+    train_model_task = run_pytorch_training_job(
+        train_df_in=scale_data_task.outputs["train_df_scaled"],
+        val_df_in=scale_data_task.outputs["val_df_scaled"],
+        training_image=config["images"]["training"],
+        namespace=config["platform"]["namespace"],
+        tuning_param_dct=katib_task.output,
+        num_dl_workers=pytorchjob_num_dl_workers,
+        max_epochs=pytorchjob_max_epochs,
+        early_stopping_patience=pytorchjob_early_stopping_patience,
+        latent_dim=latent_dim,
+        num_gpu_nodes=pytorchjob_num_gpu_nodes,
+        seed=42,
+        mlflow_uri=config["platform"]["mlflow_uri"],
+        mlflow_experiment_name=config["platform"]["mlflow_experiment_name"],
+        minio_endpoint_url=config["platform"]["minio_endpoint"],
+    )
+
     # evaluation_task = run_evaluation(
     #     model_path=train_model_task.output,
     #     val_df_in=scale_data_task.outputs["val_df_scaled"],

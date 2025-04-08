@@ -63,7 +63,7 @@ def run(remote):
         train_split=0.8,
         viz_sample_fraction=0.01,
         katib_max_epochs=100,
-        katib_max_trials=15,
+        katib_max_trials=3,
         katib_batch_size_list=["32", "64", "128", "256"],
         katib_beta_list=["0.001", "0.0001", "0.0001", "0.00001"],
         katib_learning_rate_list=["0.0005", "0.0001", "0.00005"],

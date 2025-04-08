@@ -575,7 +575,6 @@ def run_katib_experiment(
 def run_pytorch_training_job(
     train_df_in: Input[Dataset],
     val_df_in: Input[Dataset],
-    minio_model_bucket: str,
     training_image: str,
     namespace: str,
     num_dl_workers: int,
@@ -585,47 +584,59 @@ def run_pytorch_training_job(
     latent_dim: int,
     seed: int,
     num_gpu_nodes: int,
-) -> str:
-    """Initiates a PyTorch training job.
+    mlflow_uri: str,
+    mlflow_experiment_name: str,
+    minio_endpoint_url: str,
+    export_torchscript: bool = True,
+    model_output_file: str = None,
+) -> Dict:
+    """Initiates a PyTorch training job with MLflow tracking.
 
     Parameters:
     train_df_in: KFP input for the training dataframe.
     val_df_in: KFP input for the validation dataframe.
-    config_path: Path to the config within the training image (e.g., './swat-config.toml' or './sim-all-config.toml').
-    minio_model_bucket: Bucket to store trained models.
     training_image: Docker image containing training code.
     namespace: Kubernetes namespace to run the training job in.
     num_dl_workers: Number of data loader processes.
-    number_trainng_samples: Number of samples to draw from the training dataframe.
-    number_validation_samples: Number of samples to draw from the validation dataframe.
-    batch_size: Batch size during training.
-    learning_rate: Learning rate parameter.
-    beta: Beta parameter for ELBO loss.
+    tuning_param_dct: Dictionary containing tuned hyperparameters (batch_size, learning_rate, beta).
     max_epochs: Maximum epochs to train.
     early_stopping_patience: Number of epochs to wait for improved validation loss before early stopping.
     latent_dim: Number of latent variables.
-    seq_len: Length of sequences used for training.
     seed: Seed for random number generation to ensure reproducibility.
     num_gpu_nodes: Number of GPU nodes to utilize during training.
+    mlflow_uri: URI of the MLflow tracking server.
+    mlflow_experiment_name: Name of the MLflow experiment.
+    minio_endpoint_url: URL of the MinIO endpoint for artifact storage.
+    export_torchscript: Whether to export a TorchScript version of the model.
+    model_output_file: Optional file name under which the trained model checkpoint will be saved.
 
     Returns:
-    A string message indicating the status of the PytorchJob
+    A dictionary containing model run information including MLflow URIs
     """
-
     import time
     from kubernetes import client, config
     from kubernetes.client.rest import ApiException
     from datetime import datetime
     from loguru import logger
+    import uuid
 
+    # Extract hyperparameters from the tuning dictionary
     batch_size, learning_rate, beta = [
         tuning_param_dct[k] for k in ("batch_size", "learning_rate", "beta")
     ]
 
     pytorchjob_name = "pytorch-job"
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_output_file = f"{pytorchjob_name}_{current_time}"
+    
+    # Generate model_output_file name if not provided
+    if not model_output_file:
+        model_output_file = f"{pytorchjob_name}_{current_time}"
+    
+    # Generate a unique run name for MLflow
+    run_name = f"pytorch-job-{current_time}-{str(uuid.uuid4())[:8]}"
+    logger.info(f"Generated MLflow run name: {run_name}")
 
+    # Create the command for the PyTorch training job
     command = [
         "python",
         "container_component_src/main.py",
@@ -644,10 +655,15 @@ def run_pytorch_training_job(
         f"--num-gpu-nodes={num_gpu_nodes}",
         "--run-as-pytorchjob=True",
         f"--model-output-file={model_output_file}",
-        f"--minio-model-bucket={minio_model_bucket}",
-        "--likelihood-mse-mixing-factor=0.1",
+        f"--likelihood-mse-mixing-factor=0.1",
+        f"--mlflow-uri={mlflow_uri}",
+        f"--mlflow-experiment-name={mlflow_experiment_name}",
+        f"--minio-endpoint-url={minio_endpoint_url}",
+        f"--export-torchscript={'True' if export_torchscript else 'False'}",
+        f"--run-name={run_name}"  # Pass the generated run name
     ]
 
+    # Define the Kubernetes pod template with GPU resources
     template = {
         "metadata": {"annotations": {"sidecar.istio.io/inject": "false"}},
         "spec": {
@@ -657,6 +673,11 @@ def run_pytorch_training_job(
                     "image": training_image,
                     "imagePullPolicy": "Always",
                     "command": command,
+                    "resources": {
+                        "limits": {
+                            "nvidia.com/gpu": 1  # Request 1 GPU per pod
+                        }
+                    },
                     "env": [
                         {
                             "name": "AWS_ACCESS_KEY_ID",
@@ -676,7 +697,7 @@ def run_pytorch_training_job(
                                 }
                             },
                         },
-                        {"name": "S3_ENDPOINT", "value": "minio.minio"},
+                        {"name": "S3_ENDPOINT", "value": minio_endpoint_url},
                         {"name": "S3_USE_HTTPS", "value": "0"},
                         {"name": "S3_VERIFY_SSL", "value": "0"},
                     ],
@@ -687,6 +708,7 @@ def run_pytorch_training_job(
         },
     }
 
+    # Define the PyTorchJob manifest
     training_job_manifest = {
         "apiVersion": "kubeflow.org/v1",
         "kind": "PyTorchJob",
@@ -707,7 +729,7 @@ def run_pytorch_training_job(
         },
     }
 
-    # Kubernetes API clients
+    # Initialize Kubernetes API clients
     try:
         config.load_incluster_config()
     except:
@@ -730,9 +752,10 @@ def run_pytorch_training_job(
             custom_api.create_namespaced_custom_object(
                 body=training_job_manifest, **args_dict
             )
-            print(f"Job {pytorchjob_name} started.")
+            logger.info(f"Job {pytorchjob_name} started with MLflow run name {run_name}")
         except ApiException as e:
-            print(f"Error starting job: {e}")
+            logger.error(f"Error starting job: {e}")
+            raise
 
     def get_pytorchjob_status():
         """Retrieves and returns the last status of the PyTorchJob."""
@@ -742,7 +765,7 @@ def run_pytorch_training_job(
             )
             return job.get("status", {}).get("conditions", [])[-1].get("type", "")
         except ApiException as e:
-            print(f"Error retrieving job status: {e}")
+            logger.error(f"Error retrieving job status: {e}")
             return None
 
     def delete_pytorchjob():
@@ -751,13 +774,14 @@ def run_pytorch_training_job(
             custom_api.delete_namespaced_custom_object(
                 name=pytorchjob_name, **args_dict
             )
-            print(f"Job {pytorchjob_name} deleted.")
+            logger.info(f"Job {pytorchjob_name} deleted.")
         except ApiException as e:
-            print(f"Error deleting job: {e}")
+            logger.error(f"Error deleting job: {e}")
 
     # Start the job and wait for a while
     start_pytorchjob()
     time.sleep(20)
+    
     # Periodically check the job status
     while True:
         status = get_pytorchjob_status()
@@ -765,16 +789,32 @@ def run_pytorch_training_job(
 
         if status == "Succeeded":
             logger.info("Job succeeded!")
+            
+            # Create run info with just the run name
+            run_info = {
+                "status": "success",
+                "run_name": run_name,
+                "model_uri": f"runs:/name:{run_name}/model",  # Special format for referring to run by name
+                "hyperparameters": {
+                    "batch_size": batch_size,
+                    "learning_rate": learning_rate,
+                    "beta": beta,
+                    "latent_dim": latent_dim
+                }
+            }
+            
+            if export_torchscript:
+                run_info["torchscript_uri"] = f"runs:/name:{run_name}/artifacts/torchscript/model_torchscript.pt"
+            
             delete_pytorchjob()
-            break
+            return run_info
+            
         elif status in ["Failed", "Error"]:
-            logger.info("Job did not succeed. Exiting.")
+            logger.error("Job failed or encountered an error.")
             delete_pytorchjob()
-            break
+            raise RuntimeError(f"PyTorch job {pytorchjob_name} failed")
 
         time.sleep(10)
-
-    return f"{minio_model_bucket}/{model_output_file}"
 
 
 @dsl.container_component

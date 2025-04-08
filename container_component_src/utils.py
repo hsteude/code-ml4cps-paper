@@ -40,7 +40,7 @@ def read_data_from_minio(df_path: str) -> pd.DataFrame:
     storage_options = {
         "key": os.environ["AWS_ACCESS_KEY_ID"],
         "secret": os.environ["AWS_SECRET_ACCESS_KEY"],
-        "client_kwargs": {"endpoint_url": f'http://{os.environ["S3_ENDPOINT"]}'},
+        "client_kwargs": {"endpoint_url": os.environ["S3_ENDPOINT"]},
     }
 
     if df_path.startswith("minio://"):

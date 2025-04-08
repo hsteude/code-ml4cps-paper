@@ -182,6 +182,7 @@ def run_dask_preprocessing(
 @click.option("--mlflow-experiment-name", type=str, required=True)
 @click.option("--minio-endpoint-url", type=str, required=True)
 @click.option("--export-torchscript", type=bool, default=False, required=False)  # Added option for TorchScript
+@click.option("--run-name", type=str, required=False, help="MLflow run name to use")
 def run_training(
     train_df_path: str,
     val_df_path: str,
@@ -202,6 +203,7 @@ def run_training(
     mlflow_experiment_name: str,
     minio_endpoint_url: str,
     export_torchscript: bool = False,  # Default to False
+    run_name: Optional[str] = None,
 ):
     """
     Starts the training of the model.
@@ -305,53 +307,81 @@ def run_training(
         logger.debug(f"Trainer global_rank: {trainer.global_rank}")
         logger.debug(f"Trainer local_rank: {trainer.local_rank}")
 
-    # Auto log all MLflow entities
-    mlflow.pytorch.autolog()
-
-    # Train the model with MLflow tracking
-    with mlflow.start_run() as run:
-        # Train the model
-        trainer.fit(model=model, datamodule=dm)
+    # Only initialize MLflow on the master process
+    if not run_as_pytorchjob or trainer.global_rank == 0:
+        # MLflow configuration
+        mlflow.set_tracking_uri(mlflow_uri)
+        mlflow.set_experiment(mlflow_experiment_name)
+        os.environ["AWS_ENDPOINT_URL"] = minio_endpoint_url
         
-        # Log model to MLflow
-        mlflow.pytorch.log_model(model, "model")
+        # Enable MLflow autologging
+        mlflow.pytorch.autolog()
         
-        # Optionally export TorchScript model
+        # Set run name if provided
+        if run_name:
+            mlflow.set_tag("mlflow.runName", run_name)
+    
+    # Train the model - this will automatically log to MLflow from the master process
+    trainer.fit(model=model, datamodule=dm)
+    
+    # Only perform post-training logging on the master process
+    if not run_as_pytorchjob or trainer.global_rank == 0:
+        # Export TorchScript model if requested (only from master process)
         if export_torchscript:
             logger.info("Exporting TorchScript model")
-            
-            # Get sample input for tracing
-            batch = next(iter(dm.train_dataloader()))
-            sample_input = batch  # Take first item from batch as example
-            
-            # Convert to TorchScript with tracing
-            script_model = model.to_torchscript(method="trace", example_inputs=sample_input)
-            
-            # Save TorchScript model temporarily
-            torchscript_path = "model_torchscript.pt"
-            torch.jit.save(script_model, torchscript_path)
-            
-            
-            # Log both as artifacts to MLflow
-            mlflow.log_artifact(torchscript_path, "torchscript")
-            
-            # Clean up temporary files
             try:
-                os.remove(torchscript_path)
+                # Get a batch for tracing
+                batch = next(iter(dm.val_dataloader()))
+                batch_x = batch[0]
+                
+                # Create and save TorchScript model
+                model.eval()
+                script_model = model.to_torchscript(method="script")
+                torchscript_path = "model_torchscript.pt"
+                torch.jit.save(script_model, torchscript_path)
+                
+                # Log as MLflow artifact
+                mlflow.log_artifact(torchscript_path, "torchscript")
+                
+                # Clean up
+                try:
+                    os.remove(torchscript_path)
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temporary files: {e}")
+                    
+                logger.info("Successfully exported TorchScript model")
             except Exception as e:
-                logger.warning(f"Failed to clean up temporary files: {e}")
+                logger.error(f"Failed to export TorchScript model: {e}")
         
-        mlflow.end_run()
-
-    # Return run information
-    run_info = run.to_dictionary()
-    run_info["model_uri"] = f"runs:/{run.info.run_id}/model"
+        # Get the current run to construct return values
+        active_run = mlflow.active_run()
+        if active_run:
+            run_info = {
+                "run_id": active_run.info.run_id,
+                "run_name": run_name,
+                "model_uri": f"runs:/{active_run.info.run_id}/model",
+                "hyperparameters": {
+                    "batch_size": batch_size,
+                    "learning_rate": lr,
+                    "beta": beta,
+                    "latent_dim": latent_dim
+                }
+            }
+            
+            if export_torchscript:
+                run_info["torchscript_uri"] = f"runs:/{active_run.info.run_id}/artifacts/torchscript/model_torchscript.pt"
+                
+            # Don't end the run - autolog will handle this
+            return run_info
+        else:
+            # Fallback if no active run found
+            return {
+                "status": "completed without active MLflow run",
+                "run_name": run_name
+            }
     
-    if export_torchscript:
-        run_info["torchscript_uri"] = f"runs:/{run.info.run_id}/artifacts/torchscript/model_torchscript.pt"
-        run_info["config_pbtxt_uri"] = f"runs:/{run.info.run_id}/artifacts/torchscript/config.pbtxt"
-    
-    return run_info
+    # Workers don't need to return anything meaningful
+    return {"status": "worker_completed"}
 
 
 @cli.command("run_evaluation")
