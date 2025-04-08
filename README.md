@@ -315,8 +315,8 @@ python -m ipython kernel install --name "ml4cps" --user
 ##### Run Pytorch trianing locally in a notebook pod
 ```sh
 python container_component_src/main.py run_training \
-  --train-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/train_df_scaled" \
-  --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/val_df_scaled" \
+  --train-df-path "minio://mlpipeline-henrik-sebastian-steude/v2/artifacts/columbus-eclss-ad-pipeline/40d6cd03-6cf7-4272-918a-bff69869d3a7/scale-dataframes/e797e168-7e2d-4a7f-866a-375a39159adb/train_df_scaled" \
+  --val-df-path "minio://mlpipeline-henrik-sebastian-steude/v2/artifacts/columbus-eclss-ad-pipeline/40d6cd03-6cf7-4272-918a-bff69869d3a7/scale-dataframes/e797e168-7e2d-4a7f-866a-375a39159adb/val_df_scaled" \
   --seed 42 \
   --batch-size 32 \
   --latent-dim 10 \
@@ -324,12 +324,18 @@ python container_component_src/main.py run_training \
   --beta 0.5 \
   --lr 0.001 \
   --early-stopping-patience 30 \
-  --max-epochs 10 \
+  --max-epochs 2 \
   --num-gpu-nodes 1 \
   --run-as-pytorchjob False \
   --model-output-file "local_test_model" \
-  --num-dl-workers 12
-```
+  --num-dl-workers 12 \
+  --mlflow-uri "http://mlflow-server.henrik-sebastian-steude.svc.cluster.local" \
+  --mlflow-experiment-name "eclss-vae-training" \
+  --minio-endpoint-url "http://minio.minio" \
+  --export-torchscript True \
+  --likelihood-mse-mixing-factor 0.0001
+  
+` ``
 
 ##### Run evaluation locally in a notebook pod
 ```sh

@@ -370,6 +370,9 @@ def run_katib_experiment(
     beta_list: List[str],
     learning_rate_list: List[str],
     latent_dim: int,
+    mlflow_uri: str,
+    mlflow_experiment_name: str,
+    minio_endpoint_url: str,
 ) -> Dict:
     import time
     from kubernetes import client, config
@@ -402,6 +405,9 @@ def run_katib_experiment(
         "--run-as-pytorchjob=False",
         "--model-output-file=local_test_model",
         "--likelihood-mse-mixing-factor=0.01",
+        f"--mlflow-uri={mlflow_uri}",
+        f"--mlflow-experiment-name={mlflow_experiment_name}",
+        f"--minio-endpoint-url={minio_endpoint_url}",
     ]
 
     # Environment Dictionary

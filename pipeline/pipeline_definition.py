@@ -131,20 +131,23 @@ def columbus_eclss_ad_pipeline(
         label_column=config["col-names"]["ar_col"],
     )
 
-    # katib_task = run_katib_experiment(
-    #     df_train=scale_data_task.outputs["train_df_scaled"],
-    #     df_val=scale_data_task.outputs["val_df_scaled"],
-    #     experiment_name=f"columbus-anomaly-detection-ml4cps",
-    #     image=config["images"]["tuning"],
-    #     namespace=config["platform"]["namespace"],
-    #     max_epochs=katib_max_epochs,
-    #     max_trials=katib_max_trials,
-    #     batch_size_list=katib_batch_size_list,
-    #     beta_list=katib_beta_list,
-    #     learning_rate_list=katib_learning_rate_list,
-    #     latent_dim=latent_dim,
-    # )
-    #
+    katib_task = run_katib_experiment(
+        df_train=scale_data_task.outputs["train_df_scaled"],
+        df_val=scale_data_task.outputs["val_df_scaled"],
+        experiment_name=f"columbus-anomaly-detection-ml4cps",
+        image=config["images"]["tuning"],
+        namespace=config["platform"]["namespace"],
+        max_epochs=katib_max_epochs,
+        max_trials=katib_max_trials,
+        batch_size_list=katib_batch_size_list,
+        beta_list=katib_beta_list,
+        learning_rate_list=katib_learning_rate_list,
+        latent_dim=latent_dim,
+        mlflow_uri=config["platform"]["mlflow_uri"],
+        mlflow_experiment_name=config["platform"]["mlflow_experiment_name"],
+        minio_endpoint_url=config["platform"]["minio_endpoint"],
+    )
+ 
     # train_model_task = run_pytorch_training_job(
     #     train_df_in=scale_data_task.outputs["train_df_scaled"],
     #     val_df_in=scale_data_task.outputs["val_df_scaled"],

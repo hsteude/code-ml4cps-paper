@@ -26,6 +26,7 @@ from container_component_src.model.callbacks import (
     ResetLogVarCallback,
 )
 from container_component_src.eval.evaluator import ModelEvaluator
+import mlflow
 
 # load config
 with open("config.toml", "r") as f:
@@ -121,6 +122,7 @@ def split_parquet_file(
 @click.option("--minio-endpoint", type=str)
 @click.option("--dask-worker-image", type=str)
 @click.option("--num-dask-workers", type=int)
+@click.option("--namespace", type=str)
 def run_dask_preprocessing(
     partitioned_telemetry_paths: List[str],
     sample_frac: float,
@@ -172,9 +174,12 @@ def run_dask_preprocessing(
 @click.option("--num-gpu-nodes", type=int, required=True)
 @click.option("--num-dl-workers", type=int, required=True)
 @click.option("--run-as-pytorchjob", type=bool, required=True)
-@click.option("--model-output-file", type=str, required=True)
-@click.option("--minio-model-bucket", type=str, required=False)
+@click.option("--model-output-file", type=str, required=False)  # Optional now
 @click.option("--likelihood-mse-mixing-factor", type=float, required=False)
+@click.option("--mlflow-uri", type=str, required=True)
+@click.option("--mlflow-experiment-name", type=str, required=True)
+@click.option("--minio-endpoint-url", type=str, required=True)
+@click.option("--export-torchscript", type=bool, default=False, required=False)  # Added option for TorchScript
 def run_training(
     train_df_path: str,
     val_df_path: str,
@@ -189,9 +194,12 @@ def run_training(
     num_gpu_nodes: int,
     num_dl_workers: int,
     run_as_pytorchjob: bool,
-    model_output_file: str,
-    likelihood_mse_mixing_factor: float,
-    minio_model_bucket: Optional[str],
+    model_output_file: Optional[str],
+    likelihood_mse_mixing_factor: Optional[float],
+    mlflow_uri: str,
+    mlflow_experiment_name: str,
+    minio_endpoint_url: str,
+    export_torchscript: bool = False,  # Default to False
 ):
     """
     Starts the training of the model.
@@ -210,14 +218,24 @@ def run_training(
     num_gpu_nodes: Number of GPU nodes to use.
     num_dl_workers: Number of workers to use for the data loader.
     run_as_pytorchjob: Indicates whether to run the training as a PyTorch job.
-    model_output_file: File name under which the trained model will be saved.
-    minio_model_bucket: Name of the MinIO bucket to store the model.
+    model_output_file: Optional file name under which the trained model checkpoint will be saved.
+    likelihood_mse_mixing_factor: Factor for mixing MSE into the likelihood calculation.
+    mlflow_uri: URI of the MLflow tracking server.
+    mlflow_experiment_name: Name of the MLflow experiment.
+    minio_endpoint_url: URL of the MinIO endpoint for artifact storage.
+    export_torchscript: Whether to export a TorchScript version of the model.
     """
+    # Set up random seeds
     seed_everything(seed)
     np.random.seed(seed)
     logger.info(f"Random seed in training script set to {seed}")
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     torch.set_float32_matmul_precision("high")
+
+    # MLflow configuration
+    mlflow.set_tracking_uri(mlflow_uri)
+    mlflow.set_experiment(mlflow_experiment_name)
+    os.environ["AWS_ENDPOINT_URL"] = minio_endpoint_url
 
     # load dataset and initiate data module
     train_df = read_data_from_minio(train_df_path)
@@ -248,27 +266,31 @@ def run_training(
         strict=True,
     )
 
-    # saves top-K checkpoints based on "val_loss" metric
-    os.makedirs("data", exist_ok=True)
-    checkpoint_callback = ModelCheckpoint(
-        save_top_k=1,
-        monitor="val_loss",
-        mode="min",
-        dirpath="data/",
-        filename=model_output_file,
-    )
+    # Determine if we need to save checkpoints locally
+    callbacks = [
+        early_stop_callback,
+        StdOutLoggerCallback(),
+        # ResetLogVarCallback(reset_epochs=5, reset_value=-2),
+    ]
+    
+    # Add checkpoint callback only if model_output_file is provided
+    if model_output_file:
+        os.makedirs("data", exist_ok=True)
+        checkpoint_callback = ModelCheckpoint(
+            save_top_k=1,
+            monitor="val_loss",
+            mode="min",
+            dirpath="data/",
+            filename=model_output_file,
+        )
+        callbacks.append(checkpoint_callback)
 
     trainer = pl.Trainer(
         max_epochs=max_epochs,
         accelerator=accelerator,
         plugins=[KubeflowEnvironment()] if run_as_pytorchjob else [],
         devices=1,
-        callbacks=[
-            checkpoint_callback,
-            early_stop_callback,
-            StdOutLoggerCallback(),
-            # ResetLogVarCallback(reset_epochs=5, reset_value=-2),
-        ],
+        callbacks=callbacks,
         num_nodes=num_gpu_nodes,
         strategy="ddp" if run_as_pytorchjob else "auto",
         enable_progress_bar=False,
@@ -281,13 +303,53 @@ def run_training(
         logger.debug(f"Trainer global_rank: {trainer.global_rank}")
         logger.debug(f"Trainer local_rank: {trainer.local_rank}")
 
-    trainer.fit(model=model, datamodule=dm)
-    trainer.save_checkpoint(model_output_file)
-    script = model.to_torchscript()
-    torch.jit.save(script, f"{model_output_file}.pt")
-    if minio_model_bucket:
-        upload_file_to_minio_bucket(minio_model_bucket, model_output_file)
-        upload_file_to_minio_bucket(minio_model_bucket, f"{model_output_file}.pt")
+    # Auto log all MLflow entities
+    mlflow.pytorch.autolog()
+
+    # Train the model with MLflow tracking
+    with mlflow.start_run() as run:
+        # Train the model
+        trainer.fit(model=model, datamodule=dm)
+        
+        # Log model to MLflow
+        mlflow.pytorch.log_model(model, "model")
+        
+        # Optionally export TorchScript model
+        if export_torchscript:
+            logger.info("Exporting TorchScript model")
+            
+            # Get sample input for tracing
+            batch = next(iter(dm.train_dataloader()))
+            sample_input = batch  # Take first item from batch as example
+            
+            # Convert to TorchScript with tracing
+            script_model = model.to_torchscript(method="trace", example_inputs=sample_input)
+            
+            # Save TorchScript model temporarily
+            torchscript_path = "model_torchscript.pt"
+            torch.jit.save(script_model, torchscript_path)
+            
+            
+            # Log both as artifacts to MLflow
+            mlflow.log_artifact(torchscript_path, "torchscript")
+            
+            # Clean up temporary files
+            try:
+                os.remove(torchscript_path)
+            except Exception as e:
+                logger.warning(f"Failed to clean up temporary files: {e}")
+        
+        mlflow.end_run()
+
+    # Return run information
+    run_info = run.to_dictionary()
+    run_info["model_uri"] = f"runs:/{run.info.run_id}/model"
+    
+    if export_torchscript:
+        run_info["torchscript_uri"] = f"runs:/{run.info.run_id}/artifacts/torchscript/model_torchscript.pt"
+        run_info["config_pbtxt_uri"] = f"runs:/{run.info.run_id}/artifacts/torchscript/config.pbtxt"
+    
+    return run_info
 
 
 @cli.command("run_evaluation")
