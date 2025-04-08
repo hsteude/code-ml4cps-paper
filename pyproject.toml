@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "bokeh>=3.7.2",
+    "boto3>=1.37.1",
     "click>=8.1.8",
     "dask>=2025.3.0",
     "dask-kubernetes>=2025.1.1",
@@ -16,6 +17,9 @@ dependencies = [
     "kfp-kubernetes>=1.4.0",
     "kserve>=0.15.0",
     "loguru>=0.7.3",
+    "mlflow>=2.21.3",
+    "mlserver>=1.2.1",
+    "mlserver-mlflow>=1.6.1",
     "pandas>=2.2.3",
     "plotly>=6.0.1",
     "pyarrow>=19.0.1",
