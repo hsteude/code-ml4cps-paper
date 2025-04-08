@@ -6,6 +6,7 @@ import toml
 from pipeline.components import (
     split_parquet_file,
     run_dask_preprocessing,
+    get_label,
     get_label_series,
     create_train_dev_test_split,
     fit_scaler,
@@ -92,19 +93,16 @@ def columbus_eclss_ad_pipeline(
         timestamp_col=config["col-names"]["timestamp_col"],
         minio_endpoint=config["platform"]["minio_endpoint"],
         dask_worker_image=config["images"]["dask-worker"],
+        namespace=config["platform"]["namespace"],
         num_dask_workers=num_dask_workers,
     )
     dask_preprocessing_task.after(split_parquet_files_task)
-    add_minio_env_vars_to_tasks([dask_preprocessing_task])
-
-    import_label_xls_task = dsl.importer(
-        artifact_uri=config["paths"]["labels_xls_artifact_uri"],
-        artifact_class=dsl.Dataset,
-    )
+    get_labels_task = get_label(labels_xls_path=config["paths"]["labels_xls_artifact_uri"])
+    add_minio_env_vars_to_tasks([dask_preprocessing_task, get_labels_task])
 
     get_label_series_task = get_label_series(
         df_telemetry_in=dask_preprocessing_task.outputs["preprocessed_df"],
-        df_label_in=import_label_xls_task.output,
+        df_label_in=get_labels_task.outputs['df_labels'],
         ar_col=config["col-names"]["ar_col"],
         anomaly_start_col=config["col-names"]["ar_start_ts_col"],
         anomaly_end_col=config["col-names"]["ar_end_ts_col"],

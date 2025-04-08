@@ -68,12 +68,39 @@ def run_dask_preprocessing(
             dask_worker_image,
             "--num-dask-workers",
             str(num_dask_workers),
+            "--namespace",
+            namespace,
         ],
     )
 
+@dsl.component(
+    base_image=f'{config["images"]["dask-component"]}',
+)
+def get_label(
+    labels_xls_path:str,
+    df_labels: Output[Dataset]
+    ):
+    """Reads an Excel file containing labels and converts it to parquet format.
+
+    Args:
+        labels_xls_path: Path to the Excel file containing labels
+        df_labels: KFP Output Dataset for the converted parquet file
+    """
+    import pandas as pd
+    import os
+
+    storage_options = {
+        "key": os.environ["AWS_ACCESS_KEY_ID"],
+        "secret": os.environ["AWS_SECRET_ACCESS_KEY"],
+        "client_kwargs": {"endpoint_url": f'http://{os.environ["S3_ENDPOINT"]}'},
+    }
+
+    df_label = pd.read_excel(labels_xls_path, storage_options=storage_options)
+    df_label.to_parquet(df_labels.path)
+
 
 @dsl.component(
-    packages_to_install=["pyarrow", "pandas", "xlrd"], base_image="python:3.9"
+    base_image=f'{config["images"]["dask-component"]}',
 )
 def get_label_series(
     df_telemetry_in: Input[Dataset],
@@ -99,7 +126,7 @@ def get_label_series(
 
     # Read dataset
     df_telemetry = pd.read_parquet(df_telemetry_in.path)
-    df_label = pd.read_excel(df_label_in.path)
+    df_label = pd.read_parquet(df_label_in.path)
 
     # Convert anomaly start and end times to datetime
     df_label[anomaly_start_col] = pd.to_datetime(
