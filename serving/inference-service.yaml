@@ -5,8 +5,8 @@ metadata:
 spec:
   predictor:
     triton:
-      storageUri: s3://mlflow-henrik-sebastian-steude/55/dafdc1a936344b1996e5d8160dfc4b96/artifacts/torchscript/model_torchscript.pt
-      runtimeVersion: 20.10-py3
+      storageUri: s3://mlflow-henrik-sebastian-steude/55/c0ee6a4bf64946e3acbce4c58b565f1d/artifacts/triton_model
+      runtimeVersion: 22.12-py3 
       env:
       - name: OMP_NUM_THREADS
         value: "1"

@@ -333,23 +333,6 @@ python container_component_src/main.py run_training \
   --mlflow-experiment-name "eclss-vae-training" \
   --minio-endpoint-url "http://minio.minio" \
   --export-torchscript True \
-  --likelihood-mse-mixing-factor 0.0001
-  
-` ``
-
-##### Run evaluation locally in a notebook pod
-```sh
-python container_component_src/main.py run_evaluation \
-  --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/val_df_scaled" \
-  --test-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/test_df_scaled" \
-  --batch-size 1024 \
-  --model-path "eclss-model-bucket/pytorch-job_20231228_110719" \
-  --device "cuda" \
-  --result-df-path 'local_data/results_df.parquet'\
-  --metrics-dict-path 'local_data/metrics.json' \
-  --threshold-min -1000 \
-  --threshold-max 0 \
-  --number-thresholds 1000 \
-  --label-col-name "Anomaly" \
-  --likelihood-mse-mixing-factor 0.001
+  --likelihood-mse-mixing-factor 0.0001 \
+  --run-name unique-run-name
 ```

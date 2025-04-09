@@ -27,6 +27,8 @@ from container_component_src.model.callbacks import (
 )
 from container_component_src.eval.evaluator import ModelEvaluator
 import mlflow
+import tempfile
+import shutil
 
 # load config
 with open("config.toml", "r") as f:
@@ -323,53 +325,102 @@ def run_training(
     
     # Train the model - this will automatically log to MLflow from the master process
     trainer.fit(model=model, datamodule=dm)
-    
+        
     # Only perform post-training logging on the master process
     if not run_as_pytorchjob or trainer.global_rank == 0:
-        # Export TorchScript model if requested (only from master process)
-        if export_torchscript:
-            logger.info("Exporting TorchScript model")
-            try:
-                # Get a batch for tracing
-                batch = next(iter(dm.val_dataloader()))
-                batch_x = batch[0]
-                
-                # Create and save TorchScript model
-                model.eval()
-                script_model = model.to_torchscript(method="script")
-                torchscript_path = "model_torchscript.pt"
-                torch.jit.save(script_model, torchscript_path)
-                
-                # Log as MLflow artifact
-                mlflow.log_artifact(torchscript_path, "torchscript")
-                
-                # Clean up
-                try:
-                    os.remove(torchscript_path)
-                except Exception as e:
-                    logger.warning(f"Failed to clean up temporary files: {e}")
-                    
-                logger.info("Successfully exported TorchScript model")
-            except Exception as e:
-                logger.error(f"Failed to export TorchScript model: {e}")
-        
         # Get the current run to construct return values
         active_run = mlflow.active_run()
+        
+        # Initialize triton_model_uri as None
+        triton_model_uri = None
+        
         if active_run:
+            run_id = active_run.info.run_id
+            
+            # Export TorchScript model if requested (only from master process)
+            if export_torchscript:
+                logger.info("Exporting TorchScript model")
+                try:
+                    # Get a batch for tracing
+                    batch = next(iter(dm.val_dataloader()))
+                    
+                    # Create and save TorchScript model
+                    model.eval()
+                    script_model = model.to_torchscript(method="script", example_inputs=batch)
+                    torchscript_path = "model_torchscript.pt"
+                    torch.jit.save(script_model, torchscript_path)
+                    
+                    # Create a temporary directory with Triton model structure
+                    
+                    # Model name for Triton
+                    model_name = "eclss-vae"  # Adjust to your model name
+                    
+                    # Model properties - use the actual shape from your batch
+                    input_dim = batch.shape[1]  # Input dimension from batch (should be 181)
+                    
+                    # Create temporary directory with Triton structure
+                    triton_dir = tempfile.mkdtemp(prefix="triton_model_")
+
+                    # Create Triton directory structure
+                    model_dir = os.path.join(triton_dir, model_name)
+                    version_dir = os.path.join(model_dir, "1")
+                    os.makedirs(version_dir, exist_ok=True)
+                    
+                    # Create COMPLETE config.pbtxt with correct dimensions
+                    config_content = f"""name: "{model_name}"
+platform: "pytorch_libtorch"
+max_batch_size: 64
+
+input [
+  {{
+    name: "input__0"
+    data_type: TYPE_FP32
+    dims: [ {input_dim} ]  # Just the feature dimension (181), batch is handled separately
+  }}
+]
+
+output [
+  {{
+    name: "output__0"
+    data_type: TYPE_FP32
+    dims: [ {input_dim} ]  # Same as input for VAE reconstruction
+  }}
+]
+"""
+                    # Save config.pbtxt
+                    config_path = os.path.join(model_dir, "config.pbtxt")
+                    with open(config_path, "w") as f:
+                        f.write(config_content)
+                    
+                    # Copy TorchScript model to Triton structure
+                    shutil.copy(torchscript_path, os.path.join(version_dir, "model.pt"))
+                    
+                    # Log the entire Triton model directory as an artifact
+                    mlflow.log_artifact(model_dir, "triton_model")
+                    
+                    # Get the S3 path for the Triton model
+                    # Extract the experiment ID and run ID to construct the S3 path
+                    experiment_id = active_run.info.experiment_id
+                    
+                    logger.info(f"Successfully exported TorchScript model with Triton configuration")
+
+                            
+                except Exception as e:
+                    logger.error(f"Failed to export TorchScript model: {e}")
+            
+            # Construct the return dictionary
             run_info = {
-                "run_id": active_run.info.run_id,
+                "run_id": run_id,
                 "run_name": run_name,
-                "model_uri": f"runs:/{active_run.info.run_id}/model",
+                "model_uri": f"runs:/{run_id}/model",
                 "hyperparameters": {
                     "batch_size": batch_size,
                     "learning_rate": lr,
                     "beta": beta,
                     "latent_dim": latent_dim
-                }
+                },
+                "status": "success"
             }
-            
-            if export_torchscript:
-                run_info["torchscript_uri"] = f"runs:/{active_run.info.run_id}/artifacts/torchscript/model_torchscript.pt"
                 
             # Don't end the run - autolog will handle this
             return run_info
@@ -379,9 +430,6 @@ def run_training(
                 "status": "completed without active MLflow run",
                 "run_name": run_name
             }
-    
-    # Workers don't need to return anything meaningful
-    return {"status": "worker_completed"}
 
 
 @cli.command("run_evaluation")
