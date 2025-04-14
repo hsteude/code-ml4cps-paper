@@ -46,7 +46,7 @@ def run_dask_preprocessing(
     minio_endpoint: str,
     dask_worker_image: str,
     num_dask_workers: int,
-    namespace: str
+    namespace: str,
 ):
     """Kubeflow pipeline component for Dask preprocessing"""
     return dsl.ContainerSpec(
@@ -73,13 +73,11 @@ def run_dask_preprocessing(
         ],
     )
 
+
 @dsl.component(
     base_image=f'{config["images"]["dask-component"]}',
 )
-def get_label(
-    labels_xls_path:str,
-    df_labels: Output[Dataset]
-    ):
+def get_label(labels_xls_path: str, df_labels: Output[Dataset]):
     """Reads an Excel file containing labels and converts it to parquet format.
 
     Args:
@@ -408,7 +406,7 @@ def run_katib_experiment(
     import os
 
     # Appending argo node id to experiment name so experiments always get unique names
-    experiment_name = experiment_name + "-" + os.environ['ARGO_NODE_ID'].split('-')[-1]
+    experiment_name = experiment_name + "-" + os.environ["ARGO_NODE_ID"].split("-")[-1]
     logger.info(f"Starting experiment: {experiment_name}")
     group = "kubeflow.org"
     version = "v1beta1"
@@ -627,11 +625,11 @@ def run_pytorch_training_job(
 
     pytorchjob_name = "pytorch-job"
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
+
     # Generate model_output_file name if not provided
     if not model_output_file:
         model_output_file = f"{pytorchjob_name}_{current_time}"
-    
+
     # Generate a unique run name for MLflow
     run_name = f"pytorch-job-{current_time}-{str(uuid.uuid4())[:8]}"
     logger.info(f"Generated MLflow run name: {run_name}")
@@ -660,7 +658,7 @@ def run_pytorch_training_job(
         f"--mlflow-experiment-name={mlflow_experiment_name}",
         f"--minio-endpoint-url={minio_endpoint_url}",
         f"--export-torchscript={'True' if export_torchscript else 'False'}",
-        f"--run-name={run_name}"  # Pass the generated run name
+        f"--run-name={run_name}",  # Pass the generated run name
     ]
 
     # Define the Kubernetes pod template with GPU resources
@@ -674,9 +672,7 @@ def run_pytorch_training_job(
                     "imagePullPolicy": "Always",
                     "command": command,
                     "resources": {
-                        "limits": {
-                            "nvidia.com/gpu": 1  # Request 1 GPU per pod
-                        }
+                        "limits": {"nvidia.com/gpu": 1}  # Request 1 GPU per pod
                     },
                     "env": [
                         {
@@ -752,7 +748,9 @@ def run_pytorch_training_job(
             custom_api.create_namespaced_custom_object(
                 body=training_job_manifest, **args_dict
             )
-            logger.info(f"Job {pytorchjob_name} started with MLflow run name {run_name}")
+            logger.info(
+                f"Job {pytorchjob_name} started with MLflow run name {run_name}"
+            )
         except ApiException as e:
             logger.error(f"Error starting job: {e}")
             raise
@@ -781,7 +779,7 @@ def run_pytorch_training_job(
     # Start the job and wait for a while
     start_pytorchjob()
     time.sleep(20)
-    
+
     # Periodically check the job status
     while True:
         status = get_pytorchjob_status()
@@ -789,7 +787,7 @@ def run_pytorch_training_job(
 
         if status == "Succeeded":
             logger.info("Job succeeded!")
-            
+
             # Create run info with just the run name
             run_info = {
                 "status": "success",
@@ -799,22 +797,25 @@ def run_pytorch_training_job(
                     "batch_size": batch_size,
                     "learning_rate": learning_rate,
                     "beta": beta,
-                    "latent_dim": latent_dim
-                }
+                    "latent_dim": latent_dim,
+                },
             }
-            
+
             if export_torchscript:
-                run_info["torchscript_uri"] = f"runs:/name:{run_name}/artifacts/torchscript/model_torchscript.pt"
-            
+                run_info["torchscript_uri"] = (
+                    f"runs:/name:{run_name}/artifacts/torchscript/model_torchscript.pt"
+                )
+
             delete_pytorchjob()
             return run_info
-            
+
         elif status in ["Failed", "Error"]:
             logger.error("Job failed or encountered an error.")
             delete_pytorchjob()
             raise RuntimeError(f"PyTorch job {pytorchjob_name} failed")
 
         time.sleep(10)
+
 
 from kfp import dsl
 from kfp.dsl import Input, Output, Dataset, component
@@ -840,11 +841,11 @@ def evaluate_model(
     batch_size: int = 512,
     threshold_min: int = -1500,
     threshold_max: int = 0,
-    number_thresholds: int = 500
+    number_thresholds: int = 500,
 ) -> dict:
     """
     Komponente zur Evaluierung eines trainierten Modells aus MLflow.
-    
+
     Args:
         train_out_dict: Dictionary mit MLflow Run-Informationen (muss 'run_name' enthalten)
         val_df_path: Pfad zum Validierungs-Dataframe
@@ -858,22 +859,22 @@ def evaluate_model(
         threshold_min: Minimaler Threshold-Wert
         threshold_max: Maximaler Threshold-Wert
         number_thresholds: Anzahl der zu evaluierenden Thresholds
-        
+
     Returns:
         Dictionary mit Evaluierungsmetriken
     """
     # Import ModelEvaluator from your package
     from container_component_src.eval.evaluator import ModelEvaluator
     import os
-    
-    #Set AWS/Minio environment variables
+
+    # Set AWS/Minio environment variables
     os.environ["AWS_ENDPOINT_URL"] = minio_endpoint_url
-    
+
     # Extract run name from dictionary
-    run_name = train_out_dict.get('run_name')
+    run_name = train_out_dict.get("run_name")
     if not run_name:
         raise ValueError("train_out_dict muss einen 'run_name' enthalten")
-    
+
     # Initialize and run ModelEvaluator
     evaluator = ModelEvaluator(
         val_df_path=val_df.path,
@@ -889,13 +890,12 @@ def evaluate_model(
         threshold_max=threshold_max,
         num_thresholds=number_thresholds,
     )
-    
-    
+
     # run eval
     result_df, metrics_dict = evaluator.run()
-    
+
     result_df.to_parquet(results_df.path)
-    
+
     return metrics_dict
 
 
@@ -911,7 +911,7 @@ def visualize_results(
     sample_fraction: float = 0.1,
     label_col_name: str = "Anomaly",
     scatter_y_min: int = -4000,
-    scatter_y_max: int = 500
+    scatter_y_max: int = 500,
 ) -> None:
     """Creates output plot and logs metrics"""
 
@@ -996,137 +996,213 @@ def extract_composite_f1(
     metrics_dict: Dict,
 ) -> float:
     """Extracts composite F1 score from metrics"""
-    return float(metrics_dict['composite_f1'])
-
-@dsl.component()
-def say_hi(input_words: str) -> str:
-    """Says Hi"""
-    return f'Hi {input_word}'
+    return float(metrics_dict["composite_f1"])
 
 
 @dsl.component(
-    packages_to_install=[],
     base_image="python:3.9",
 )
-def extract_scaler_path(
-    scaler: Input[Model]
-) -> str:
+def extract_scaler_path(scaler: Input[Model]) -> str:
     """Extracts scaler path because passing artifacts to nested pipeline is not yet implemented"""
 
     return scaler.uri
 
+
 @dsl.component(
-    packages_to_install=["kubernetes", "loguru", "s3fs"],
-    base_image="python:3.9",
+    base_image=f'{config["images"]["serving"]}',
+    packages_to_install=["kubernetes==24.2.0", "mlflow", "boto3"],
 )
-def serve_model(
-    model_path: str,
-    scaler_path: str,
-    prod_path: str,
-    serving_image: str,
-    model_name: str = "vae"
-):
-    """Deploys an InferenceService that serves the model trained by the pipeline
+def deploy_to_kserve(
+    train_out_dict: Dict,
+    mlflow_uri: str,
+    minio_endpoint_url: str,
+    namespace: str,
+    service_name: str,
+    mlflow_bucket: str,
+    mlflow_experiment_name: str,
+    device: str = "gpu",
+    gpu_count: int = 1,
+    runtime_version: str = "22.12-py3",
+) -> Dict:
+    """
+    Deploys a PyTorch model to KServe using Triton Inference Server.
+
+    TODO: in practice we would add a kserve transformer that applies
+    the fitted scaler
 
     Args:
-        model_path: model artefact path
-        scaler_path: scaler artefact
-        prod_path: object storage path to where prod models should reside
-        serving_image: container image to use for model serving
-        model_name: model name (used in model endpoint)
+        train_out_dict: Dictionary with training output information
+        mlflow_uri: URI to MLflow tracking server
+        minio_endpoint_url: URL to MinIO endpoint
+        namespace: Kubernetes namespace to deploy to
+        service_name: Name for the InferenceService (defaults to run_name if not provided)
+        device: "gpu" or "cpu"
+        gpu_count: Number of GPUs to allocate (if device is "gpu")
+        runtime_version: Triton runtime version
+
+    Returns:
+        Dictionary with deployment information
     """
-    from loguru import logger
-    import s3fs
     import os
-    from pathlib import Path
-    import tempfile
+    import mlflow
     from kubernetes import client, config
+    import time
+    import json
 
-    fs = s3fs.S3FileSystem(
-        anon=False,
-        use_ssl=False,
-        client_kwargs={
-            "endpoint_url": f'http://{os.environ["S3_ENDPOINT"]}',
-            "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
-            "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
-        },
+    # Configure MLflow and Minio
+    mlflow.set_tracking_uri(mlflow_uri)
+    os.environ["AWS_ENDPOINT_URL"] = minio_endpoint_url
+
+    # Extract run_name from dictionary
+    run_name = train_out_dict.get("run_name")
+    if not run_name:
+        raise ValueError("train_out_dict must contain a run_name")
+
+    # Find the run_id using the run_name
+    mlflow.set_experiment(mlflow_experiment_name)
+    run_info = mlflow.search_runs(filter_string=f"tags.mlflow.runName = '{run_name}'")
+    if run_info.empty:
+        raise ValueError(f"No run found with name {run_name}")
+
+    run_id = run_info.iloc[0].run_id
+    experiment_id = run_info.iloc[0].experiment_id
+
+    print(f"Found run with ID: {run_id}, experiment ID: {experiment_id}")
+
+    # Construct the S3 path to the triton_model artifact
+    triton_model_uri = (
+        f"s3://{mlflow_bucket}/{experiment_id}/{run_id}/artifacts/triton_model"
     )
-    prod_path = prod_path.replace("minio://", 's3://')
-    model_path = model_path.replace("minio://", "")
-    scaler_path = scaler_path.replace("minio://", "")
-    logger.info(model_path)
-    logger.info(scaler_path)
-    if not model_path.endswith(".pt"):
-        # Training operator returns path without .pt
-        model_path = model_path + ".pt"
-    # Save model and scaler
-    saved_model_path = prod_path + str(Path(model_path).name)
-    with tempfile.NamedTemporaryFile() as fp:
-        fs.get(model_path, fp.name)
-        fs.put(fp.name, saved_model_path)
-    saved_scaler_path = prod_path + str(Path(scaler_path).name)
-    with tempfile.NamedTemporaryFile() as fp:
-        fs.get(scaler_path, fp.name)
-        fs.put(fp.name, saved_scaler_path)
-    logger.info(f'Scaler saved to: {saved_scaler_path}')
-    logger.info(f'Model saved to: {saved_model_path}')
-    # Start inference service
-    inference_service = \
-        {'apiVersion': 'serving.kserve.io/v1beta1',
-         'kind': 'InferenceService',
-         'metadata': {'name': model_name},
-         'spec': {'predictor': {'containers': [{'name': 'pytorch-container',
-                                                'image': serving_image,
-                                                'imagePullPolicy': 'Always',
-                                                'command': ['python',
-                                                            '/app/container_component_src/model_serving.py',
-                                                            'predictor'],
-                                                'args': ['--model_name', model_name],
-                                                'env': [{'name': 'STORAGE_URI', 'value': prod_path},
-                                                        {'name': 'MODEL_FILENAME',
-                                                         'value': str(Path(model_path).name)}]}]},
-                  'transformer': {'containers': [{
-                                                     'image': serving_image,
-                                                     'imagePullPolicy': 'Always',
-                                                     'name': 'scaler-container',
-                                                     'command': ['python',
-                                                                 '/app/container_component_src/model_serving.py',
-                                                                 'transformer'],
-                                                     'args': ['--model_name', model_name],
-                                                     'env': [
-                                                         {'name': 'STORAGE_URI', 'value': prod_path},
-                                                         {'name': 'SCALER_FILENAME',
-                                                          'value': str(Path(scaler_path).name)}]}]}}}
 
-    config.load_incluster_config()
-    api_client = client.ApiClient()
-    custom_api = client.CustomObjectsApi(api_client)
+    # Load Kubernetes configuration
+    try:
+        config.load_incluster_config()
+    except:
+        config.load_kube_config()
 
-    # Pods have k8s related info mounted in /var/run/secrets/kubernetes.io
-    with open("/var/run/secrets/kubernetes.io/serviceaccount/namespace", mode='r') as file:
-        namespace = file.read()
-    # Common arguments for API calls
-    args_dict = {
-        "group": "serving.kserve.io",
-        "version": "v1beta1",
-        "namespace": namespace,
-        "plural": "inferenceservices",
+    # Create the InferenceService manifest
+    inference_service = {
+        "apiVersion": "serving.kserve.io/v1beta1",
+        "kind": "InferenceService",
+        "metadata": {"name": service_name, "namespace": namespace},
+        "spec": {
+            "predictor": {
+                "triton": {
+                    "storageUri": triton_model_uri,
+                    "runtimeVersion": runtime_version,
+                    "env": [{"name": "OMP_NUM_THREADS", "value": "1"}],
+                }
+            }
+        },
     }
 
-    try:
-        exists = custom_api.get_namespaced_custom_object(name=model_name, **args_dict)
-    except client.ApiException as e:
-        if e.status == 404:
-            exists = False
-        else:
-            raise ConnectionError()
+    # Add GPU resources if requested
+    if device.lower() == "gpu" and gpu_count > 0:
+        inference_service["spec"]["predictor"]["triton"]["resources"] = {
+            "limits": {"nvidia.com/gpu": gpu_count},
+            "requests": {"nvidia.com/gpu": gpu_count},
+        }
 
-    if exists:
-        custom_api.patch_namespaced_custom_object(
-                name=model_name, body=inference_service, **args_dict
+    # Create or update the InferenceService
+    api_instance = client.CustomObjectsApi()
+
+    try:
+        # Check if service already exists
+        try:
+            existing_service = api_instance.get_namespaced_custom_object(
+                group="serving.kserve.io",
+                version="v1beta1",
+                namespace=namespace,
+                plural="inferenceservices",
+                name=service_name,
             )
-    else:
-        custom_api.create_namespaced_custom_object(
-            body=inference_service, **args_dict
-        )
-    logger.info(f'InferenceService {model_name} started in the namespace {namespace}')
+            print(f"Service {service_name} already exists, updating...")
+
+            # Update the existing service
+            response = api_instance.patch_namespaced_custom_object(
+                group="serving.kserve.io",
+                version="v1beta1",
+                namespace=namespace,
+                plural="inferenceservices",
+                name=service_name,
+                body=inference_service,
+            )
+        except client.exceptions.ApiException as e:
+            if e.status == 404:
+                # Service doesn't exist, create it
+                print(f"Creating new InferenceService {service_name}...")
+                response = api_instance.create_namespaced_custom_object(
+                    group="serving.kserve.io",
+                    version="v1beta1",
+                    namespace=namespace,
+                    plural="inferenceservices",
+                    body=inference_service,
+                )
+            else:
+                raise e
+
+        print(f"Successfully deployed/updated InferenceService '{service_name}'")
+
+        # Wait for the service to be ready (maximum of 2 minutes)
+        print("Waiting for service to be ready...")
+        max_retries = 24  # 24 retries * 5 seconds = 2 minutes
+        retries = 0
+        is_ready = False
+
+        while retries < max_retries and not is_ready:
+            time.sleep(5)
+            service = api_instance.get_namespaced_custom_object(
+                group="serving.kserve.io",
+                version="v1beta1",
+                namespace=namespace,
+                plural="inferenceservices",
+                name=service_name,
+            )
+
+            status = service.get("status", {})
+            conditions = status.get("conditions", [])
+
+            for condition in conditions:
+                if (
+                    condition.get("type") == "Ready"
+                    and condition.get("status") == "True"
+                ):
+                    is_ready = True
+                    print(f"Service {service_name} is ready!")
+                    break
+
+            if not is_ready:
+                print(f"Waiting for service to be ready ({retries+1}/{max_retries})...")
+                retries += 1
+
+        # Construct service URLs
+        internal_url = f"http://{service_name}.{namespace}.svc.cluster.local"
+        service_hostname = service.get("status", {}).get("url", "")
+        if service_hostname:
+            # Format may vary depending on your ingress setup
+            external_url = f"https://$DOMAIN/serving/{namespace}/{service_name}"
+        else:
+            external_url = "Not available"
+
+        # Return result
+        return {
+            "status": "deployed" if is_ready else "pending",
+            "service_name": service_name,
+            "namespace": namespace,
+            "triton_model_uri": triton_model_uri,
+            "internal_url": internal_url,
+            "external_url": external_url,
+            "run_id": run_id,
+            "run_name": run_name,
+        }
+
+    except Exception as e:
+        print(f"Error deploying InferenceService: {e}")
+        return {
+            "status": "failed",
+            "error": str(e),
+            "service_name": service_name,
+            "namespace": namespace,
+            "run_id": run_id,
+            "run_name": run_name,
+        }

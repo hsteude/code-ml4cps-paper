@@ -11,15 +11,13 @@ from pipeline.components import (
     create_train_dev_test_split,
     fit_scaler,
     scale_dataframes,
-    visualize_split,
     run_katib_experiment,
     run_pytorch_training_job,
     evaluate_model,
     visualize_results,
     extract_composite_f1,
     extract_scaler_path,
-    serve_model,
-    say_hi
+    deploy_to_kserve
 )
 from container_component_src.utils import create_s3_client
 
@@ -193,10 +191,16 @@ def columbus_eclss_ad_pipeline(
     composite_f1_task = extract_composite_f1(metrics_dict=evaluation_task.outputs['Output'])
     scaler_path_task = extract_scaler_path(scaler=fit_scaler_task.output)
     with dsl.If(composite_f1_task.output > threshold):
-        say_hi_scaler_task = say_hi(input_word=scaler_path_task.output)
-    #     serve_task = serve_model(
-    #         model_path=train_model_task.output,
-    #         scaler_path=scaler_path.output,
-    #         prod_path=f'minio://{config["paths"]["prod_path"]}',
-    #         serving_image=config["images"]["serving"])
-    #     add_minio_env_vars_to_tasks([serve_task])
+        # Deployment-Schritt
+        deploy_task = deploy_to_kserve(
+            train_out_dict=train_model_task.output,
+            mlflow_uri=config["platform"]["mlflow_uri"],
+            mlflow_experiment_name=config["platform"]["mlflow_experiment_name"],
+            minio_endpoint_url=config["platform"]["minio_endpoint"],
+            namespace=config["platform"]["namespace"],
+            service_name="eclss-point-vae",
+            device="gpu",
+            gpu_count=1,
+            runtime_version="22.12-py3",
+            mlflow_bucket=config["platform"]["mlflow_bucket"],
+        )
