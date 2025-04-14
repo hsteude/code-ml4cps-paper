@@ -244,8 +244,8 @@ def run_training(
     os.environ["AWS_ENDPOINT_URL"] = minio_endpoint_url
 
     # load dataset and initiate data module
-    train_df = read_data_from_minio(train_df_path)
-    val_df = read_data_from_minio(val_df_path)
+    train_df = read_data_from_minio(train_df_path, minio_endpoint=minio_endpoint_url)
+    val_df = read_data_from_minio(val_df_path, minio_endpoint=minio_endpoint_url)
     dm = TimeStampDataModule(
         train_df=train_df,
         val_df=val_df,

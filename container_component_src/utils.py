@@ -27,7 +27,7 @@ def create_s3_client() -> s3fs.S3FileSystem:
     )
 
 
-def read_data_from_minio(df_path: str) -> pd.DataFrame:
+def read_data_from_minio(df_path: str, minio_endpoint: str) -> pd.DataFrame:
     """
     Read data from MinIO and return it as a pandas DataFrame.
 
@@ -40,7 +40,7 @@ def read_data_from_minio(df_path: str) -> pd.DataFrame:
     storage_options = {
         "key": os.environ["AWS_ACCESS_KEY_ID"],
         "secret": os.environ["AWS_SECRET_ACCESS_KEY"],
-        "client_kwargs": {"endpoint_url": os.environ["S3_ENDPOINT"]},
+        "client_kwargs": {"endpoint_url": minio_endpoint},
     }
 
     if df_path.startswith("minio://"):
