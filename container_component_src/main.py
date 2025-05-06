@@ -26,6 +26,9 @@ from container_component_src.model.callbacks import (
     ResetLogVarCallback,
 )
 from container_component_src.eval.evaluator import ModelEvaluator
+import mlflow
+import tempfile
+import shutil
 
 # load config
 with open("config.toml", "r") as f:
@@ -121,6 +124,7 @@ def split_parquet_file(
 @click.option("--minio-endpoint", type=str)
 @click.option("--dask-worker-image", type=str)
 @click.option("--num-dask-workers", type=int)
+@click.option("--namespace", type=str)
 def run_dask_preprocessing(
     partitioned_telemetry_paths: List[str],
     sample_frac: float,
@@ -129,6 +133,7 @@ def run_dask_preprocessing(
     minio_endpoint: str,
     dask_worker_image: str,
     num_dask_workers: int,
+    namespace: str,
 ) -> None:
     """
     Runs the Dask preprocessing pipeline, which mainly does random sampling.
@@ -141,6 +146,7 @@ def run_dask_preprocessing(
         minio_endpoint: Endpoint URL of MinIO.
         dask_worker_image: Docker image to use for Dask workers.
         num_dask_workers: Number of workers to use in the Dask cluster.
+        namespace: Namespace for the Dask cluster.
     """
     minio_storage_option_dct = {
         "key": os.environ["AWS_ACCESS_KEY_ID"],
@@ -153,10 +159,10 @@ def run_dask_preprocessing(
         image=dask_worker_image,
         storage_options=minio_storage_option_dct,
         sample_frac=sample_frac,
+        namespace=namespace
     )
     df = prc.run(path_list=partitioned_telemetry_paths, timestamp_col=timestamp_col)
     df.to_parquet(df_out_path)
-
 
 @cli.command("run_training")
 @click.option("--train-df-path", type=str, required=True)
@@ -172,9 +178,13 @@ def run_dask_preprocessing(
 @click.option("--num-gpu-nodes", type=int, required=True)
 @click.option("--num-dl-workers", type=int, required=True)
 @click.option("--run-as-pytorchjob", type=bool, required=True)
-@click.option("--model-output-file", type=str, required=True)
-@click.option("--minio-model-bucket", type=str, required=False)
+@click.option("--model-output-file", type=str, required=False)  # Optional now
 @click.option("--likelihood-mse-mixing-factor", type=float, required=False)
+@click.option("--mlflow-uri", type=str, required=True)
+@click.option("--mlflow-experiment-name", type=str, required=True)
+@click.option("--minio-endpoint-url", type=str, required=True)
+@click.option("--export-torchscript", type=bool, default=False, required=False)  # Added option for TorchScript
+@click.option("--run-name", type=str, required=False, help="MLflow run name to use")
 def run_training(
     train_df_path: str,
     val_df_path: str,
@@ -189,9 +199,13 @@ def run_training(
     num_gpu_nodes: int,
     num_dl_workers: int,
     run_as_pytorchjob: bool,
-    model_output_file: str,
-    likelihood_mse_mixing_factor: float,
-    minio_model_bucket: Optional[str],
+    model_output_file: Optional[str],
+    likelihood_mse_mixing_factor: Optional[float],
+    mlflow_uri: str,
+    mlflow_experiment_name: str,
+    minio_endpoint_url: str,
+    export_torchscript: bool = False,  # Default to False
+    run_name: Optional[str] = None,
 ):
     """
     Starts the training of the model.
@@ -210,18 +224,28 @@ def run_training(
     num_gpu_nodes: Number of GPU nodes to use.
     num_dl_workers: Number of workers to use for the data loader.
     run_as_pytorchjob: Indicates whether to run the training as a PyTorch job.
-    model_output_file: File name under which the trained model will be saved.
-    minio_model_bucket: Name of the MinIO bucket to store the model.
+    model_output_file: Optional file name under which the trained model checkpoint will be saved.
+    likelihood_mse_mixing_factor: Factor for mixing MSE into the likelihood calculation.
+    mlflow_uri: URI of the MLflow tracking server.
+    mlflow_experiment_name: Name of the MLflow experiment.
+    minio_endpoint_url: URL of the MinIO endpoint for artifact storage.
+    export_torchscript: Whether to export a TorchScript version of the model.
     """
+    # Set up random seeds
     seed_everything(seed)
     np.random.seed(seed)
     logger.info(f"Random seed in training script set to {seed}")
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     torch.set_float32_matmul_precision("high")
 
+    # MLflow configuration
+    mlflow.set_tracking_uri(mlflow_uri)
+    mlflow.set_experiment(mlflow_experiment_name)
+    os.environ["AWS_ENDPOINT_URL"] = minio_endpoint_url
+
     # load dataset and initiate data module
-    train_df = read_data_from_minio(train_df_path)
-    val_df = read_data_from_minio(val_df_path)
+    train_df = read_data_from_minio(train_df_path, minio_endpoint=minio_endpoint_url)
+    val_df = read_data_from_minio(val_df_path, minio_endpoint=minio_endpoint_url)
     dm = TimeStampDataModule(
         train_df=train_df,
         val_df=val_df,
@@ -248,27 +272,31 @@ def run_training(
         strict=True,
     )
 
-    # saves top-K checkpoints based on "val_loss" metric
-    os.makedirs("data", exist_ok=True)
-    checkpoint_callback = ModelCheckpoint(
-        save_top_k=1,
-        monitor="val_loss",
-        mode="min",
-        dirpath="data/",
-        filename=model_output_file,
-    )
+    # Determine if we need to save checkpoints locally
+    callbacks = [
+        early_stop_callback,
+        StdOutLoggerCallback(),
+        # ResetLogVarCallback(reset_epochs=5, reset_value=-2),
+    ]
+    
+    # Add checkpoint callback only if model_output_file is provided
+    if model_output_file:
+        os.makedirs("data", exist_ok=True)
+        checkpoint_callback = ModelCheckpoint(
+            save_top_k=1,
+            monitor="val_loss",
+            mode="min",
+            dirpath="data/",
+            filename=model_output_file,
+        )
+        callbacks.append(checkpoint_callback)
 
     trainer = pl.Trainer(
         max_epochs=max_epochs,
         accelerator=accelerator,
         plugins=[KubeflowEnvironment()] if run_as_pytorchjob else [],
         devices=1,
-        callbacks=[
-            checkpoint_callback,
-            early_stop_callback,
-            StdOutLoggerCallback(),
-            # ResetLogVarCallback(reset_epochs=5, reset_value=-2),
-        ],
+        callbacks=callbacks,
         num_nodes=num_gpu_nodes,
         strategy="ddp" if run_as_pytorchjob else "auto",
         enable_progress_bar=False,
@@ -281,46 +309,166 @@ def run_training(
         logger.debug(f"Trainer global_rank: {trainer.global_rank}")
         logger.debug(f"Trainer local_rank: {trainer.local_rank}")
 
+    # Only initialize MLflow on the master process
+    if not run_as_pytorchjob or trainer.global_rank == 0:
+        # MLflow configuration
+        mlflow.set_tracking_uri(mlflow_uri)
+        mlflow.set_experiment(mlflow_experiment_name)
+        os.environ["AWS_ENDPOINT_URL"] = minio_endpoint_url
+        
+        # Enable MLflow autologging
+        mlflow.pytorch.autolog()
+        
+        # Set run name if provided
+        if run_name:
+            mlflow.set_tag("mlflow.runName", run_name)
+    
+    # Train the model - this will automatically log to MLflow from the master process
     trainer.fit(model=model, datamodule=dm)
-    trainer.save_checkpoint(model_output_file)
-    script = model.to_torchscript()
-    torch.jit.save(script, f"{model_output_file}.pt")
-    if minio_model_bucket:
-        upload_file_to_minio_bucket(minio_model_bucket, model_output_file)
-        upload_file_to_minio_bucket(minio_model_bucket, f"{model_output_file}.pt")
+        
+    # Only perform post-training logging on the master process
+    if not run_as_pytorchjob or trainer.global_rank == 0:
+        # Get the current run to construct return values
+        active_run = mlflow.active_run()
+        
+        # Initialize triton_model_uri as None
+        triton_model_uri = None
+        
+        if active_run:
+            run_id = active_run.info.run_id
+            
+            # Export TorchScript model if requested (only from master process)
+            if export_torchscript:
+                logger.info("Exporting TorchScript model")
+                try:
+                    # Get a batch for tracing
+                    batch = next(iter(dm.val_dataloader()))
+                    
+                    # Create and save TorchScript model
+                    model.eval()
+                    script_model = model.to_torchscript(method="script", example_inputs=batch)
+                    torchscript_path = "model_torchscript.pt"
+                    torch.jit.save(script_model, torchscript_path)
+                    
+                    # Create a temporary directory with Triton model structure
+                    
+                    # Model name for Triton
+                    model_name = "eclss-vae"  # Adjust to your model name
+                    
+                    # Model properties - use the actual shape from your batch
+                    input_dim = batch.shape[1]  # Input dimension from batch (should be 181)
+                    
+                    # Create temporary directory with Triton structure
+                    triton_dir = tempfile.mkdtemp(prefix="triton_model_")
+
+                    # Create Triton directory structure
+                    model_dir = os.path.join(triton_dir, model_name)
+                    version_dir = os.path.join(model_dir, "1")
+                    os.makedirs(version_dir, exist_ok=True)
+                    
+                    # Create COMPLETE config.pbtxt with correct dimensions
+                    config_content = f"""name: "{model_name}"
+platform: "pytorch_libtorch"
+max_batch_size: 64
+
+input [
+  {{
+    name: "input__0"
+    data_type: TYPE_FP32
+    dims: [ {input_dim} ]  # Just the feature dimension (181), batch is handled separately
+  }}
+]
+
+output [
+  {{
+    name: "output__0"
+    data_type: TYPE_FP32
+    dims: [ {input_dim} ]  # Same as input for VAE reconstruction
+  }}
+]
+"""
+                    # Save config.pbtxt
+                    config_path = os.path.join(model_dir, "config.pbtxt")
+                    with open(config_path, "w") as f:
+                        f.write(config_content)
+                    
+                    # Copy TorchScript model to Triton structure
+                    shutil.copy(torchscript_path, os.path.join(version_dir, "model.pt"))
+                    
+                    # Log the entire Triton model directory as an artifact
+                    mlflow.log_artifact(model_dir, "triton_model")
+                    
+                    # Get the S3 path for the Triton model
+                    # Extract the experiment ID and run ID to construct the S3 path
+                    experiment_id = active_run.info.experiment_id
+                    
+                    logger.info(f"Successfully exported TorchScript model with Triton configuration")
+
+                            
+                except Exception as e:
+                    logger.error(f"Failed to export TorchScript model: {e}")
+            
+            # Construct the return dictionary
+            run_info = {
+                "run_id": run_id,
+                "run_name": run_name,
+                "model_uri": f"runs:/{run_id}/model",
+                "hyperparameters": {
+                    "batch_size": batch_size,
+                    "learning_rate": lr,
+                    "beta": beta,
+                    "latent_dim": latent_dim
+                },
+                "status": "success"
+            }
+                
+            # Don't end the run - autolog will handle this
+            return run_info
+        else:
+            # Fallback if no active run found
+            return {
+                "status": "completed without active MLflow run",
+                "run_name": run_name
+            }
 
 
 @cli.command("run_evaluation")
-@click.option("--model-path", type=str, required=True)
-@click.option("--val-df-path", type=str, required=True)
-@click.option("--test-df-path", type=str, required=True)
-@click.option("--label-col-name", type=str, required=True)
-@click.option("--device", type=str, required=True)
-@click.option("--batch-size", type=int, required=True)
-@click.option("--result-df-path", type=str, required=True)
-@click.option("--metrics-dict-path", type=str, required=True)
-@click.option("--threshold-min", type=int, required=True)
-@click.option("--threshold-max", type=int, required=True)
-@click.option("--number-thresholds", type=int, required=True)
+@click.option("--run-name", type=str, required=True, help="MLflow run name to load the model from")
+@click.option("--val-df-path", type=str, required=True, help="Path to validation dataframe")
+@click.option("--test-df-path", type=str, required=True, help="Path to test dataframe")
+@click.option("--mlflow-uri", type=str, required=True, help="URI to MLflow tracking server")
+@click.option("--minio-endpoint-url", type=str, required=True, help="URL to Minio/S3 endpoint")
+@click.option("--label-col-name", type=str, required=True, help="Column name for labels")
+@click.option("--device", type=str, default="cuda", help="Device to run on (cuda/cpu)")
+@click.option("--batch-size", type=int, default=512, help="Batch size for data loading")
+@click.option("--result-df-path", type=str, required=True, help="Path to save result dataframe")
+@click.option("--metrics-dict-path", type=str, required=True, help="Path to save metrics dictionary")
+@click.option("--threshold-min", type=int, default=-1500, help="Minimum threshold value")
+@click.option("--threshold-max", type=int, default=0, help="Maximum threshold value")
+@click.option("--number-thresholds", type=int, default=500, help="Number of thresholds to evaluate")
 def run_evaluation(
     val_df_path: str,
     test_df_path: str,
-    model_path: str,
+    run_name: str,
+    mlflow_uri: str,
+    minio_endpoint_url: str,
     label_col_name: str,
     device: str,
     batch_size: int,
     result_df_path: str,
     metrics_dict_path: str,
-    threshold_min:int,
-    threshold_max:int,
-    number_thresholds:int,
+    threshold_min: int,
+    threshold_max: int,
+    number_thresholds: int,
 ):
-    """Evaluation model performance"""
+    """Evaluate model performance using a model stored in MLflow"""
 
     me = ModelEvaluator(
         val_df_path=val_df_path,
         test_df_path=test_df_path,
-        model_path=model_path,
+        run_name=run_name,
+        mlflow_uri=mlflow_uri,
+        minio_endpoint_url=minio_endpoint_url,
         label_col_name=label_col_name,
         batch_size=batch_size,
         device=device,
@@ -328,10 +476,10 @@ def run_evaluation(
         threshold_max=threshold_max,
         num_thresholds=number_thresholds,
     )
-    result_df, metrics_dct = me.run()
+    result_df, metrics_dict = me.run()
     result_df.to_parquet(result_df_path)
     with open(metrics_dict_path, 'w') as file:
-        json.dump(metrics_dct, file)
+        json.dump(metrics_dict, file)
 
 
 

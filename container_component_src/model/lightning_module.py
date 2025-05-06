@@ -33,7 +33,7 @@ class TimeStampVAE(pl.LightningModule):
         self.save_hyperparameters()
         self.beta = beta
         self.lr = lr
-        self.likelihood_mse_mixing_factor = likelihood_mse_mixing_factor
+        self.likelihood_mse_mixing_factor = likelihood_mse_mixing_factor if likelihood_mse_mixing_factor else 1
 
         # Encoder network
         self.encoder = nn.Sequential(

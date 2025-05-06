@@ -1,24 +1,39 @@
-# motivated by: https://medium.com/@albertazzir/blazing-fast-python-docker-builds-with-poetry-a78a66f5aed0
-FROM pytorch/pytorch:2.1.1-cuda12.1-cudnn8-runtime
-
-RUN pip install poetry
-
-ENV POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+# Stage 1: Build dependencies
+FROM python:3.11 as builder
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock ./
+# Install UV
+RUN pip install --no-cache-dir uv
 
+# Copy only the pyproject.toml file
+COPY pyproject.toml ./
+# Create empty directories for the packages defined in pyproject.toml
+RUN mkdir -p container_component_src pipeline
+# Copy the README.md file that is referenced in pyproject.toml
+COPY README.md ./
 
-RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
+# Install dependencies only using UV
+RUN uv pip install --system .
 
-# Copy the project files into the image
+# Stage 2: Final image
+FROM python:3.11
+
+WORKDIR /app
+
+# Install UV in the final image
+RUN pip install --no-cache-dir uv
+
+# Copy installed packages from the builder stage
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Now copy the actual code
 COPY ./container_component_src /app/container_component_src
 COPY ./pipeline /app/pipeline
 COPY ./config.toml /app/config.toml
+COPY ./README.md /app/
+COPY pyproject.toml ./
 
-RUN poetry install --without dev
-
+# Install the package itself in development mode using UV
+RUN uv pip install --system -e .

@@ -1,0 +1,17 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: eclss-point-vae
+spec:
+  predictor:
+    triton:
+      storageUri: s3://mlflow-henrik-sebastian-steude/55/c0ee6a4bf64946e3acbce4c58b565f1d/artifacts/triton_model
+      runtimeVersion: 22.12-py3 
+      env:
+      - name: OMP_NUM_THREADS
+        value: "1"
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+        requests:
+          nvidia.com/gpu: 1

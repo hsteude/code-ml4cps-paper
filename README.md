@@ -167,7 +167,8 @@ The repository structure is outlined below:
 To install the Python project locally, execute the following command:
 
 ```sh
-poetry install
+uv venv # if you did not create a virtual env yet
+uv sunc
 ```
 
 This command will set up the project with all necessary dependencies as defined
@@ -263,8 +264,6 @@ access from the outside is beyond the scope.*
 
 Model can be queried within the cluster with:
 ```shell
-# KServe<=0.10
-curl -H "Content-Type: application/json" -k "<internal-url>"  -d @request.json
 # KServe>=0.11
 curl  -H "Content-Type: application/json" -k <internal-url>/v1/models/<model-name>:predict -d @request.json
 ```
@@ -304,16 +303,20 @@ poetry run python container_component_src/main.py run_dask_preprocessing \
 ```
 
 ##### Install ipykernel for this virtual environment:
-
+Activate your virtual env e.g. like so:
 ```sh
-poetry run ipython kernel install --name "ml4cps" --user
+source .venv/bin/activate
+```
+Once the venv is actiated, run:
+```sh
+python -m ipython kernel install --name "ml4cps" --user
 ```
 
 ##### Run Pytorch trianing locally in a notebook pod
 ```sh
-poetry run python container_component_src/main.py run_training \
-  --train-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/train_df_scaled" \
-  --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/cbce7a80-12a3-4b6b-a8cf-d72110f754ac/scale-dataframes/val_df_scaled" \
+python container_component_src/main.py run_training \
+  --train-df-path "minio://mlpipeline-henrik-sebastian-steude/v2/artifacts/columbus-eclss-ad-pipeline/40d6cd03-6cf7-4272-918a-bff69869d3a7/scale-dataframes/e797e168-7e2d-4a7f-866a-375a39159adb/train_df_scaled" \
+  --val-df-path "minio://mlpipeline-henrik-sebastian-steude/v2/artifacts/columbus-eclss-ad-pipeline/40d6cd03-6cf7-4272-918a-bff69869d3a7/scale-dataframes/e797e168-7e2d-4a7f-866a-375a39159adb/val_df_scaled" \
   --seed 42 \
   --batch-size 32 \
   --latent-dim 10 \
@@ -321,26 +324,15 @@ poetry run python container_component_src/main.py run_training \
   --beta 0.5 \
   --lr 0.001 \
   --early-stopping-patience 30 \
-  --max-epochs 10 \
+  --max-epochs 2 \
   --num-gpu-nodes 1 \
   --run-as-pytorchjob False \
   --model-output-file "local_test_model" \
-  --num-dl-workers 12
-```
-
-##### Run evaluation locally in a notebook pod
-```sh
-poetry run python container_component_src/main.py run_evaluation \
-  --val-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/val_df_scaled" \
-  --test-df-path "minio://mlpipeline/v2/artifacts/columbus-eclss-ad-pipeline/af29dcf9-e43e-4e95-951a-83120beb60dc/scale-dataframes/test_df_scaled" \
-  --batch-size 1024 \
-  --model-path "eclss-model-bucket/pytorch-job_20231228_110719" \
-  --device "cuda" \
-  --result-df-path 'local_data/results_df.parquet'\
-  --metrics-dict-path 'local_data/metrics.json' \
-  --threshold-min -1000 \
-  --threshold-max 0 \
-  --number-thresholds 1000 \
-  --label-col-name "Anomaly" \
-  --likelihood-mse-mixing-factor 0.001
+  --num-dl-workers 12 \
+  --mlflow-uri "http://mlflow-server.henrik-sebastian-steude.svc.cluster.local" \
+  --mlflow-experiment-name "eclss-vae-training" \
+  --minio-endpoint-url "http://minio.minio" \
+  --export-torchscript True \
+  --likelihood-mse-mixing-factor 0.0001 \
+  --run-name unique-run-name
 ```

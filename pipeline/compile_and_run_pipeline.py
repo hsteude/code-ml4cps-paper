@@ -19,15 +19,15 @@ except ModuleNotFoundError:
 def run(remote):
     """Compile and run the Kubeflow pipeline.
 
-This script needs a bunch of env variables (or .env file with dotenv package installed):
+    This script needs a bunch of env variables (or .env file with dotenv package installed):
 
-\nKUBEFLOW_ENDPOINT
-\nKUBEFLOW_USERNAME
-\nKUBEFLOW_PASSWORD
-\nKUBEFLOW_NAMESPACE (optional inferred from KUBEFLOW_USERNAME if not provided)
-\nS3_ENDPOINT
-\nAWS_ACCESS_KEY_ID
-\nAWS_SECRET_ACCESS_KEY
+    KUBEFLOW_ENDPOINT
+    KUBEFLOW_USERNAME
+    KUBEFLOW_PASSWORD
+    KUBEFLOW_NAMESPACE (optional inferred from KUBEFLOW_USERNAME if not provided)
+    S3_ENDPOINT
+    AWS_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY
 
     """
     from pipeline.pipeline_definition import columbus_eclss_ad_pipeline
@@ -63,7 +63,7 @@ This script needs a bunch of env variables (or .env file with dotenv package ins
         train_split=0.8,
         viz_sample_fraction=0.01,
         katib_max_epochs=100,
-        katib_max_trials=15,
+        katib_max_trials=25,
         katib_batch_size_list=["32", "64", "128", "256"],
         katib_beta_list=["0.001", "0.0001", "0.0001", "0.00001"],
         katib_learning_rate_list=["0.0005", "0.0001", "0.00005"],

@@ -6,18 +6,18 @@ import toml
 from pipeline.components import (
     split_parquet_file,
     run_dask_preprocessing,
+    get_label,
     get_label_series,
     create_train_dev_test_split,
     fit_scaler,
     scale_dataframes,
-    visualize_split,
     run_katib_experiment,
     run_pytorch_training_job,
-    run_evaluation,
+    evaluate_model,
     visualize_results,
     extract_composite_f1,
     extract_scaler_path,
-    serve_model
+    deploy_to_kserve
 )
 from container_component_src.utils import create_s3_client
 
@@ -27,7 +27,7 @@ with open(f"{os.path.dirname(os.path.abspath(__file__))}/../config.toml", "r") a
 
 
 def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
-    """Adds environment variables for minio to the tasks"""
+    """Adds environment variables for MinIO to the tasks"""
     for task in task_list:
         kubernetes.use_secret_as_env(
             task,
@@ -35,9 +35,12 @@ def add_minio_env_vars_to_tasks(task_list: List[dsl.PipelineTask]) -> None:
             secret_key_to_env={
                 "AWS_ACCESS_KEY_ID": "AWS_ACCESS_KEY_ID",
                 "AWS_SECRET_ACCESS_KEY": "AWS_SECRET_ACCESS_KEY",
-                "S3_ENDPOINT": "S3_ENDPOINT",
-            }
+            },
         )
+            # Add S3_ENDPOINT from environment variable
+        s3_endpoint = os.environ.get("S3_ENDPOINT")
+        if s3_endpoint:
+            task.set_env_variable(name="S3_ENDPOINT", value=os.environ.get("S3_ENDPOINT"))
 
 
 # define pipeline
@@ -78,7 +81,7 @@ def columbus_eclss_ad_pipeline(
     eval_threshold_min: int = -200,
     eval_threshold_max: int = -100,
     eval_number_thresholds: int = 100,
-    threshold: float = 0.7
+    threshold: float = 0.7,
 ):
     split_parquet_files_task = split_parquet_files_sub_pipeline(
         rowgroups_per_file=rowgroups_per_file
@@ -89,19 +92,16 @@ def columbus_eclss_ad_pipeline(
         timestamp_col=config["col-names"]["timestamp_col"],
         minio_endpoint=config["platform"]["minio_endpoint"],
         dask_worker_image=config["images"]["dask-worker"],
+        namespace=config["platform"]["namespace"],
         num_dask_workers=num_dask_workers,
     )
     dask_preprocessing_task.after(split_parquet_files_task)
-    add_minio_env_vars_to_tasks([dask_preprocessing_task])
-
-    import_label_xls_task = dsl.importer(
-        artifact_uri=config["paths"]["labels_xls_artifact_uri"],
-        artifact_class=dsl.Dataset,
-    )
+    get_labels_task = get_label(labels_xls_path=config["paths"]["labels_xls_artifact_uri"])
+    add_minio_env_vars_to_tasks([dask_preprocessing_task, get_labels_task])
 
     get_label_series_task = get_label_series(
         df_telemetry_in=dask_preprocessing_task.outputs["preprocessed_df"],
-        df_label_in=import_label_xls_task.output,
+        df_label_in=get_labels_task.outputs['df_labels'],
         ar_col=config["col-names"]["ar_col"],
         anomaly_start_col=config["col-names"]["ar_start_ts_col"],
         anomaly_end_col=config["col-names"]["ar_end_ts_col"],
@@ -140,12 +140,14 @@ def columbus_eclss_ad_pipeline(
         beta_list=katib_beta_list,
         learning_rate_list=katib_learning_rate_list,
         latent_dim=latent_dim,
+        mlflow_uri=config["platform"]["mlflow_uri"],
+        mlflow_experiment_name=config["platform"]["mlflow_experiment_name"],
+        minio_endpoint_url=config["platform"]["minio_endpoint"],
     )
-
+ 
     train_model_task = run_pytorch_training_job(
         train_df_in=scale_data_task.outputs["train_df_scaled"],
         val_df_in=scale_data_task.outputs["val_df_scaled"],
-        minio_model_bucket=config["paths"]["minio_model_bucket"],
         training_image=config["images"]["training"],
         namespace=config["platform"]["namespace"],
         tuning_param_dct=katib_task.output,
@@ -155,14 +157,21 @@ def columbus_eclss_ad_pipeline(
         latent_dim=latent_dim,
         num_gpu_nodes=pytorchjob_num_gpu_nodes,
         seed=42,
+        mlflow_uri=config["platform"]["mlflow_uri"],
+        mlflow_experiment_name=config["platform"]["mlflow_experiment_name"],
+        minio_endpoint_url=config["platform"]["minio_endpoint"],
     )
 
-    evaluation_task = run_evaluation(
-        model_path=train_model_task.output,
-        val_df_in=scale_data_task.outputs["val_df_scaled"],
-        test_df_in=scale_data_task.outputs["test_df_scaled"],
-        label_col_name=config["col-names"]["ar_col"],
-        device="cuda",
+    # Modell-Evaluierungsschritt
+    evaluation_task = evaluate_model(
+        val_df=scale_data_task.outputs["val_df_scaled"],
+        test_df=scale_data_task.outputs["test_df_scaled"],
+        train_out_dict=train_model_task.output,
+        mlflow_uri=config["platform"]["mlflow_uri"],
+        mlflow_experiment_name=config["platform"]["mlflow_experiment_name"],
+        minio_endpoint_url=config["platform"]["minio_endpoint"],
+        label_col_name="Anomaly",
+        device="cpu",
         batch_size=eval_batch_size,
         threshold_min=eval_threshold_min,
         threshold_max=eval_threshold_max,
@@ -171,20 +180,27 @@ def columbus_eclss_ad_pipeline(
     add_minio_env_vars_to_tasks([evaluation_task])
 
     visualize_results_task = visualize_results(
-        result_df_in=evaluation_task.outputs["result_df"],
-        metrics_json=evaluation_task.outputs["metrics_dict"],
+        result_df_in=evaluation_task.outputs["results_df"],
+        metrics_dict=evaluation_task.outputs["Output"],
         sample_fraction=viz_sample_fraction,
         label_col_name=config["col-names"]["ar_col"],
         scatter_y_min=-4000,
         scatter_y_max=500
     )
 
-    composite_f1 = extract_composite_f1(metrics_json=evaluation_task.outputs['metrics_dict'])
-    scaler_path = extract_scaler_path(scaler=fit_scaler_task.output)
-    with dsl.If(composite_f1.output > threshold):
-        serve_task = serve_model(
-            model_path=train_model_task.output,
-            scaler_path=scaler_path.output,
-            prod_path=f'minio://{config["paths"]["prod_path"]}',
-            serving_image=config["images"]["serving"])
-        add_minio_env_vars_to_tasks([serve_task])
+    composite_f1_task = extract_composite_f1(metrics_dict=evaluation_task.outputs['Output'])
+    scaler_path_task = extract_scaler_path(scaler=fit_scaler_task.output)
+    with dsl.If(composite_f1_task.output > threshold):
+        # Deployment-Schritt
+        deploy_task = deploy_to_kserve(
+            train_out_dict=train_model_task.output,
+            mlflow_uri=config["platform"]["mlflow_uri"],
+            mlflow_experiment_name=config["platform"]["mlflow_experiment_name"],
+            minio_endpoint_url=config["platform"]["minio_endpoint"],
+            namespace=config["platform"]["namespace"],
+            service_name="eclss-point-vae",
+            device="gpu",
+            gpu_count=1,
+            runtime_version="22.12-py3",
+            mlflow_bucket=config["platform"]["mlflow_bucket"],
+        )
